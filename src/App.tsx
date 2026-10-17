@@ -67,7 +67,7 @@ function Sidebar({
             Çalışma Defteri
           </p>
           <p className="mt-0.5 text-[10px] font-semibold tracking-[0.2em] text-slate-400">
-            YKS TAKİP ALANI
+            DERS TAKİP ALANI
           </p>
         </div>
       </div>
