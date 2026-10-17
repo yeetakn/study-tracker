@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <title>Çalışma Defteri — İlerleme Listesi</title>
+  <desc>Rounded checklist card with three progress bars and completion marks, in navy, coral, ochre and mint.</desc>
+  <!-- Transparent background; suitable for app icons and further editing. -->
+  <g stroke="#102A3A" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="76" y="72" width="360" height="368" rx="48" fill="#FFF8E9"/>
+    <!-- First progress row -->
+    <rect x="118" y="137" width="205" height="48" rx="24" fill="#F1E3C7" stroke="none"/>
+    <rect x="118" y="137" width="145" height="48" rx="24" fill="#FF826B" stroke="none"/>
+    <path d="M354 151l13 13 25-28" stroke="#102A3A"/>
+    <!-- Second progress row -->
+    <rect x="118" y="226" width="205" height="48" rx="24" fill="#F1E3C7" stroke="none"/>
+    <rect x="118" y="226" width="112" height="48" rx="24" fill="#D4AE68" stroke="none"/>
+    <path d="M354 240l13 13 25-28" stroke="#102A3A"/>
+    <!-- Third progress row -->
+    <rect x="118" y="315" width="205" height="48" rx="24" fill="#F1E3C7" stroke="none"/>
+    <rect x="118" y="315" width="174" height="48" rx="24" fill="#27CDA8" stroke="none"/>
+    <path d="M354 329l13 13 25-28" stroke="#27CDA8"/>
+  </g>
+</svg>
