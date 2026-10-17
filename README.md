@@ -1,132 +1,308 @@
 # Study Tracker
 
-A client-side web application for tracking YKS exam preparation. Record study sessions, organize subjects, review study history, and generate reports.
+A local-first web application for tracking study. Manage study sessions, organize subjects, review study history, and generate PDF reports.
 
-**Languages:** [English](README.md) | [Türkçe](README.tr.md)
+**Documentation:** [English](README.md) | [Türkçe](README.tr.md)
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Technology Stack](#technology-stack)
+- [System Requirements](#system-requirements)
+- [Installation Guide](#installation-guide)
+  - [1. Install Node.js and npm](#1-install-nodejs-and-npm)
+  - [2. Obtain the Project](#2-obtain-the-project)
+  - [3. Open the Project Directory](#3-open-the-project-directory)
+  - [4. Install Dependencies](#4-install-dependencies)
+  - [5. Start the Application](#5-start-the-application)
+- [Available Commands](#available-commands)
+- [Data Storage and Backups](#data-storage-and-backups)
+- [Troubleshooting](#troubleshooting)
+- [Limitations](#limitations)
+
+## Overview
+
+Study Tracker helps students record and review their study activities. The application runs in a web browser and stores data locally using IndexedDB.
+
+The current version does not require a user account, remote server, or cloud service.
 
 ## Features
 
-- **Dashboard:** Review study activity and summary statistics.
-- **Study Records:** Create, edit, and delete study sessions.
-- **Calendar:** Browse study history by date.
-- **Subject Management:** Add, rename, and delete subjects.
-- **Reports:** Generate daily, weekly, biweekly, monthly, and custom date-range reports.
-- **PDF Export:** Export study reports as PDF documents.
-- **Data Backup:** Export application data to JSON.
-- **Data Restore:** Import data from a JSON backup.
-- **Data Reset:** Reset local application data after explicit confirmation.
+- Dashboard with study summaries and statistics
+- Study record creation, editing, and deletion
+- Calendar-based study history
+- Subject management
+- Reports for daily, weekly, biweekly, monthly, and custom date ranges
+- PDF report export
+- JSON data backup and restore
+- Explicitly confirmed local data reset
 
 ## Technology Stack
 
-- **React** — user interface
-- **TypeScript** — static type checking
-- **Vite** — development server and build tooling
-- **Tailwind CSS** — styling
-- **IndexedDB** — client-side data persistence
-- **idb** — IndexedDB API wrapper
-- **jsPDF** and **jspdf-autotable** — PDF generation
-- **date-fns** — date manipulation
-- **lucide-react** — icons
+| Technology | Purpose |
+|---|---|
+| React | User interface |
+| TypeScript | Static type checking |
+| Vite | Development server and production build |
+| Tailwind CSS | Styling |
+| IndexedDB | Local browser storage |
+| `idb` | IndexedDB API wrapper |
+| `jsPDF` | PDF generation |
+| `jspdf-autotable` | Tables in PDF reports |
+| `date-fns` | Date operations |
+| `lucide-react` | Icons |
 
-## Requirements
+## System Requirements
 
-- Node.js (LTS recommended)
-- npm
+Required:
 
-Git is optional and only required if you intend to clone the repository.
+- A supported desktop operating system: Windows, Linux, or macOS
+- Node.js, preferably an active LTS release
+- npm, included with Node.js
+- A modern web browser
+- Internet access for downloading the project and installing dependencies
 
-The application can be developed on Windows, Linux, or macOS.
+Git is optional if you download the project as a ZIP archive. It is required if you clone the repository using Git.
 
-## Installation
+> **Important:** Node.js is a development and runtime tool required by the setup commands. It does not mean the application itself is Windows-specific. The current project runs in a browser and does not provide a standalone desktop installer.
 
-### 1. Open the project directory
+## Installation Guide
 
-Open a terminal in the project root directory.
+### 1. Install Node.js and npm
 
-### 2. Install dependencies
+Node.js provides the JavaScript runtime used by the development tools. npm installs the project's dependencies.
+
+1. Visit the official Node.js website: https://nodejs.org/
+2. Download an active LTS release for your operating system.
+3. Run the installer and follow its instructions.
+4. Keep npm enabled in the installation options if prompted.
+5. Finish the installation.
+6. Close and reopen your terminal so the updated PATH can be detected.
+
+Verify the installation:
+
+```bash
+node --version
+npm --version
+```
+
+Both commands should print version numbers.
+
+If either command is not recognized, restart the terminal. If the problem persists, check that Node.js is installed and that its installation directory is available through your system's PATH.
+
+### 2. Obtain the Project
+
+Choose one of the following methods.
+
+**Option A — Download the source code**
+
+1. Open the project's GitHub repository in your browser.
+2. Select **Code**, then **Download ZIP**.
+3. Extract the downloaded archive.
+4. Locate the extracted project directory containing `package.json` and `package-lock.json`.
+
+**Option B — Clone the repository**
+
+Install Git from https://git-scm.com/ if necessary. Then run the following command, replacing the placeholder with the actual repository URL:
+
+```bash
+git clone <REPOSITORY_URL>
+```
+
+Open the directory created by Git.
+
+The project root is the directory containing `package.json`. All commands in this guide should be executed from that directory.
+
+### 3. Open the Project Directory
+
+Open a terminal in the project root.
+
+Alternatively, open the project folder in Visual Studio Code and select **Terminal → New Terminal**.
+
+Verify that the expected files are present:
+
+```text
+package.json
+package-lock.json
+README.md
+README.tr.md
+src/
+public/
+```
+
+The directory names may change as the project evolves, but `package.json` must be present before you install dependencies.
+
+### 4. Install Dependencies
+
+Run:
+
+```bash
+npm ci
+```
+
+`npm ci` installs the dependency versions recorded in `package-lock.json`. It is recommended for a clean and reproducible installation.
+
+If the lockfile is missing or intentionally needs to be regenerated, use:
 
 ```bash
 npm install
 ```
 
-### 3. Start the development server
+Wait for npm to finish. If installation fails, review the terminal output before proceeding.
+
+Do not delete `package-lock.json` as a routine troubleshooting step. It helps keep dependency versions consistent.
+
+#### Windows PowerShell
+
+If PowerShell blocks `npm.ps1` because of the current execution policy, use the Windows command shim:
+
+```powershell
+npm.cmd ci
+```
+
+If necessary, use `npm.cmd install` instead of `npm install`.
+
+This workaround does not require changing the system's execution policy.
+
+### 5. Start the Application
+
+Start the Vite development server:
 
 ```bash
 npm run dev
 ```
 
-Open the local URL displayed in the terminal. The default Vite development URL is usually `http://localhost:5173`.
-
-### Windows PowerShell
-
-If PowerShell prevents `npm.ps1` from running because of the current execution policy, use `npm.cmd` instead:
+On Windows PowerShell, if needed:
 
 ```powershell
-npm.cmd install
 npm.cmd run dev
 ```
 
-This is a PowerShell-specific workaround, not a Windows requirement for the application.
+Wait until Vite displays a local URL. Open that URL in your browser. The default address is usually:
 
-## Build and Preview
+http://localhost:5173/
 
-Create a production build:
+Keep the terminal open while using the development server. Closing the terminal stops the server.
+
+To stop it manually, focus the terminal and press `Ctrl+C`.
+
+## Available Commands
+
+Run these commands from the project root.
+
+| Command | Description |
+|---|---|
+| `npm run dev` | Starts the development server |
+| `npm run build` | Runs TypeScript project checks and creates a production build |
+| `npm run lint` | Runs ESLint |
+| `npm run preview` | Serves the production build locally for preview |
+
+Windows PowerShell alternatives:
+
+```powershell
+npm.cmd run dev
+npm.cmd run build
+npm.cmd run lint
+npm.cmd run preview
+```
+
+### Verify the Project
+
+Run the following checks before submitting changes or publishing an update:
+
+```bash
+npm run lint
+npm run build
+```
+
+Both commands should finish without errors. A Vite bundle-size warning may still appear during the build; a warning is not necessarily a failed build.
+
+### Production Build
+
+To generate production assets:
 
 ```bash
 npm run build
 ```
 
-Preview the production build locally:
+The output is written to the `dist/` directory.
+
+To preview those assets locally:
 
 ```bash
 npm run preview
 ```
 
-Run these commands from the project root directory.
+The preview server is intended for local verification. It is not, by itself, a production hosting service or a standalone installer.
 
-## Data Storage
+## Data Storage and Backups
 
-Study records and subject information are stored locally in the browser using IndexedDB.
+Study records and subject information are stored in the browser's IndexedDB database.
 
-- No account or remote server is required for local use.
-- Data is not automatically synchronized between devices or browsers.
-- Clearing the browser's site data may permanently delete locally stored records.
-- JSON backup and restore can be used to transfer data between environments.
-- Regular backups are recommended before resetting data or changing devices.
+- Data is stored locally in the browser used to access the application.
+- The current version does not automatically synchronize data between devices or browsers.
+- Clearing browser site data may permanently delete local records.
+- JSON backup and restore are available for transferring data.
+- Create a backup before resetting data, changing browsers, or moving to another device.
 
-After restoring a backup, verify that the expected records and subjects are available.
+After restoring a backup, verify that the expected records and subjects are present.
 
-## Project Structure
+**Data reset is destructive.** Use it only when you intend to clear the application's local data, and create a backup beforehand if the records matter.
 
-```text
-study-tracker/
-├── public/
-│   └── fonts/          # Fonts used in PDF output
-├── src/
-│   ├── components/     # Shared UI components
-│   ├── db/             # Database operations
-│   ├── pages/          # Application pages
-│   ├── services/       # Backup and utility services
-│   ├── types/          # TypeScript type definitions
-│   ├── App.tsx
-│   └── main.tsx
-├── index.html
-├── package.json
-├── package-lock.json
-├── README.md
-└── README.tr.md
+## Troubleshooting
+
+### `node` or `npm` is not recognized
+
+- Verify that Node.js is installed.
+- Close and reopen the terminal.
+- Run `node --version` and `npm --version` again.
+- Check the system PATH if the commands remain unavailable.
+
+### PowerShell reports that `npm.ps1` cannot run
+
+Use `npm.cmd` in place of `npm`. For example:
+
+```powershell
+npm.cmd ci
+npm.cmd run dev
 ```
 
-## Scope and Limitations
+### Dependency installation fails
 
-Study Tracker is a client-side application that uses browser storage. The current version does not include user accounts, cloud synchronization, or a remote database.
+- Check your internet connection.
+- Confirm that the terminal is in the project root.
+- Review the first meaningful error in the npm output.
+- Confirm that your Node.js version is compatible with the project.
+- Retry `npm ci` after resolving the underlying issue.
 
-Each browser maintains its own local data store. To move data to another browser or device, export a JSON backup and restore it in the target environment.
+### The local address does not open
 
-## Development
+- Confirm that Vite is still running in the terminal.
+- Open the exact URL displayed by Vite.
+- Check whether another application is using the same port.
+- Review any error reported by the development server.
 
-Install dependencies before starting the development server or creating a production build.
+### Changes are not visible in the browser
 
-After making significant changes, run the production build to verify that the application compiles successfully.
+- Confirm that the development server is running.
+- Check the browser console for runtime errors.
+- Refresh the page if necessary.
 
-Keep the dependency manifest and lockfile synchronized when adding or removing packages.
+### The build reports a large-chunk warning
+
+Vite may warn when a generated JavaScript chunk exceeds its configured size threshold. This warning does not automatically mean that the build has failed. Review the build output and consider code splitting if startup performance needs improvement.
+
+### Local data is missing
+
+- Confirm that you are using the same browser and browser profile.
+- Check whether browser site data was cleared.
+- Restore a previously exported JSON backup if available.
+
+## Limitations
+
+- The current application is a browser-based web app.
+- Data is stored locally in browser storage.
+- Data is not automatically shared across devices.
+
+For development, install Node.js and the project dependencies as described above.
