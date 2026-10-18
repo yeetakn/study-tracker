@@ -1,6 +1,6 @@
 # Çalışma Defteri
 
-Sınav hazırlık sürecini takip etmek için geliştirilmiş, çalışma oturumlarını kaydetmeye, dersleri düzenlemeye, çalışma geçmişini incelemeye ve PDF raporları oluşturmaya yönelik yerelde çalışan bir web uygulaması.
+Çalışma oturumlarını kaydetmeye, kişisel ders ve kategorileri düzenlemeye, çalışma geçmişini incelemeye ve PDF raporları oluşturmaya yönelik yerelde çalışan bir çalışma takip uygulaması.
 
 **Dokümantasyon:** [English](README.md) | [Türkçe](README.tr.md)
 
@@ -32,11 +32,14 @@ Mevcut sürümde kullanıcı hesabı, uzak sunucu veya bulut hizmeti zorunlu de�
 - Çalışma özetlerini ve istatistikleri görüntüleme
 - Çalışma kaydı oluşturma, düzenleme ve silme
 - Takvim üzerinden çalışma geçmişini inceleme
-- Dersleri yönetme
+- Kişisel kategoriler ve dersleri oluşturma, düzenleme ve gruplama
 - Günlük, haftalık, iki haftalık, aylık ve özel tarih aralıklı raporlar
 - PDF raporu dışa aktarma
 - JSON formatında veri yedekleme ve geri yükleme
 - Onay gerektiren yerel veri sıfırlama işlemi
+- Türkçe ve İngilizce arayüz desteği
+- Tarayıcı diline göre ilk dilin otomatik seçilmesi
+- Dil tercihinin kalıcı olarak saklanması
 
 ## Kullanılan Teknolojiler
 
@@ -108,7 +111,7 @@ Git kurulu değilse https://git-scm.com/ adresinden indirip kur.
 Ardından aşağıdaki komutu çalıştır. `<REPOSITORY_URL>` bölümünü gerçek GitHub depo adresiyle değiştir:
 
 ```bash
-git clone <REPOSITORY_URL>
+git clone https://github.com/yeetakn/study-tracker.git
 ```
 
 Git'in oluşturduğu proje klasörüne gir.

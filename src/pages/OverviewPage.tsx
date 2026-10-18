@@ -13,12 +13,14 @@ import {
   startOfMonth,
   subDays,
 } from 'date-fns'
-import { tr } from 'date-fns/locale'
+import { tr, enUS } from 'date-fns/locale'
+import { useI18n } from '../localization/i18n'
 import {
   getAllStudyRecords,
+  getCategories,
   getSubjects,
 } from '../db/database'
-import type { Subject, StudyRecord } from '../types/study'
+import type { Category, Subject, StudyRecord } from '../types/study'
 
 interface OverviewPageProps {
   onNavigate: (page: 'calendar') => void
@@ -28,16 +30,30 @@ function localDateKey(date: Date) {
   return format(date, 'yyyy-MM-dd')
 }
 
-function formatRecordDate(dateKey: string) {
+
+function getDateLocale(language: 'tr' | 'en') {
+  return language === 'tr' ? tr : enUS
+}
+
+function getNumberLocale(language: 'tr' | 'en') {
+  return language === 'tr' ? 'tr-TR' : 'en-US'
+}
+
+function formatRecordDate(dateKey: string, language: 'tr' | 'en') {
   return format(new Date(`${dateKey}T12:00:00`), 'd MMM', {
-    locale: tr,
+    locale: getDateLocale(language),
   })
 }
 
-function formatMonth(date: Date) {
-  const value = format(date, 'LLLL yyyy', { locale: tr })
-  return value.charAt(0).toLocaleUpperCase('tr-TR') + value.slice(1)
+function formatMonth(date: Date, language: 'tr' | 'en') {
+  const locale = getDateLocale(language)
+  const value = format(date, 'LLLL yyyy', { locale })
+
+  return value.charAt(0).toLocaleUpperCase(
+    getNumberLocale(language),
+  ) + value.slice(1)
 }
+
 
 function MetricCard({
   title,
@@ -92,8 +108,10 @@ function EmptyPanel({
 export default function OverviewPage({
   onNavigate,
 }: OverviewPageProps) {
+  const { language, t } = useI18n()
   const [records, setRecords] = useState<StudyRecord[]>([])
   const [subjects, setSubjects] = useState<Subject[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -105,21 +123,23 @@ export default function OverviewPage({
       setError('')
 
       try {
-        const [allRecords, allSubjects] = await Promise.all([
+        const [allRecords, allSubjects, allCategories] = await Promise.all([
           getAllStudyRecords(),
           getSubjects(),
+          getCategories(),
         ])
 
         if (!cancelled) {
           setRecords(allRecords)
           setSubjects(allSubjects)
+          setCategories(allCategories)
         }
       } catch (caught) {
         if (!cancelled) {
           setError(
             caught instanceof Error
               ? caught.message
-              : 'Çalışma verileri yüklenemedi.',
+              : t('overview.loadError'),
           )
         }
       } finally {
@@ -132,12 +152,12 @@ export default function OverviewPage({
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [t])
 
   const today = new Date()
   const monthStart = localDateKey(startOfMonth(today))
   const monthEnd = localDateKey(endOfMonth(today))
-  const monthLabel = formatMonth(today)
+  const monthLabel = formatMonth(today, language)
 
   const monthRecords = records.filter(
     (record) => record.date >= monthStart && record.date <= monthEnd,
@@ -148,20 +168,15 @@ export default function OverviewPage({
     0,
   )
 
-  const tytQuestions = monthRecords
-    .filter((record) => record.examType === 'TYT')
-    .reduce((total, record) => total + record.questionCount, 0)
-
-  const aytQuestions = monthRecords
-    .filter((record) => record.examType === 'AYT')
-    .reduce((total, record) => total + record.questionCount, 0)
-
   const studyDayCount = new Set(
     monthRecords.map((record) => record.date),
   ).size
 
   const subjectById = new Map(
     subjects.map((subject) => [subject.id, subject]),
+  )
+  const categoryNameById = new Map(
+    categories.map((category) => [category.id, category.name]),
   )
 
   const subjectTotals = subjects
@@ -184,7 +199,6 @@ export default function OverviewPage({
     {
       topic: string
       subjectId: string
-      examType: StudyRecord['examType']
       questions: number
       records: number
     }
@@ -202,7 +216,6 @@ export default function OverviewPage({
       topicMap.set(key, {
         topic: record.topic,
         subjectId: record.subjectId,
-        examType: record.examType,
         questions: record.questionCount,
         records: 1,
       })
@@ -228,7 +241,7 @@ export default function OverviewPage({
 
     return {
       key,
-      label: format(date, 'EEE', { locale: tr }),
+      label: format(date, 'EEE', { locale: getDateLocale(language) }),
       questions: dailyTotals.get(key) ?? 0,
       today: key === localDateKey(today),
     }
@@ -258,7 +271,7 @@ export default function OverviewPage({
           <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.07] px-3 py-1.5">
             <span className="size-1.5 rounded-full bg-[#a7d0b1]" />
             <span className="text-[10px] font-medium tracking-wide text-slate-200">
-              KİŞİSEL ÇALIŞMA ALANIN
+              {t('overview.personalWorkspace')}
             </span>
           </div>
 
@@ -267,16 +280,15 @@ export default function OverviewPage({
           </h2>
 
           <p className="mt-3 max-w-lg text-[13px] leading-6 text-slate-300">
-            {monthLabel} çalışma özeti. Çözdüğün soruları, çalıştığın
-            dersleri ve son kayıtlarını buradan takip edebilirsin.
-          </p>
+            {monthLabel} {t('overview.monthSummary')}. {t('overview.monthDescription')}
+            </p>
 
           <button
             type="button"
             onClick={() => onNavigate('calendar')}
             className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#dcebe0] px-4 py-3 text-xs font-semibold text-[#244b38] transition-colors hover:bg-white"
           >
-            Çalışma kaydı ekle
+            {t('overview.addRecord')}
             <ArrowRight size={15} />
           </button>
         </div>
@@ -294,28 +306,28 @@ export default function OverviewPage({
       <section>
         <div className="mb-4">
           <h2 className="text-base font-semibold tracking-tight text-slate-900">
-            {monthLabel} çalışma özeti
+            {monthLabel} {t('overview.monthSummary')}
           </h2>
           <p className="mt-1 text-xs text-slate-500">
-            Yalnızca seçilen ay içindeki gerçek kayıtlar.
+            {t('overview.selectedMonthOnly')}
           </p>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <MetricCard
-            title="Çözülen soru"
+            title={t('overview.solvedQuestions')}
             value={loading ? '…' : totalQuestions.toLocaleString('tr-TR')}
-            description="Bu ay toplam"
+            description={t('overview.thisMonthTotal')}
             icon={BookOpen}
           />
           <MetricCard
-            title="Çalışılan gün"
+            title={t('overview.studyDays')}
             value={loading ? '…' : String(studyDayCount)}
-            description="Kayıt bulunan farklı gün"
+            description={t('overview.distinctDays')}
             icon={CalendarDays}
           />
           <MetricCard
-            title="Çalışma kaydı"
+            title={t('overview.studyRecords')}
             value={loading ? '…' : String(monthRecords.length)}
             description="Bu ay oluşturulan kayıt"
             icon={Clock3}
@@ -323,46 +335,24 @@ export default function OverviewPage({
         </div>
       </section>
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-5 sm:p-6">
-          <p className="text-xs font-medium text-slate-500">TYT soru toplamı</p>
-          <p className="mt-3 text-2xl font-semibold tracking-tight text-slate-900">
-            {loading ? '…' : tytQuestions.toLocaleString('tr-TR')}
-          </p>
-          <p className="mt-1 text-[11px] text-slate-500">
-            Bu ay çözülen TYT soruları
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-5 sm:p-6">
-          <p className="text-xs font-medium text-slate-500">AYT soru toplamı</p>
-          <p className="mt-3 text-2xl font-semibold tracking-tight text-slate-900">
-            {loading ? '…' : aytQuestions.toLocaleString('tr-TR')}
-          </p>
-          <p className="mt-1 text-[11px] text-slate-500">
-            Bu ay çözülen AYT soruları
-          </p>
-        </div>
-      </section>
-
       <section className="grid grid-cols-1 gap-5 xl:grid-cols-[1.2fr_1fr]">
         <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white">
           <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
             <h2 className="text-sm font-semibold text-slate-900">
-              Derslere göre dağılım
+              {t('overview.subjectDistribution')}
             </h2>
             <p className="mt-1 text-[11px] text-slate-500">
-              {monthLabel} çözülen soru sayıları
+              {monthLabel} {t('overview.monthQuestionCounts')}
             </p>
           </div>
 
           {loading ? (
-            <p className="p-6 text-sm text-slate-500">Veriler yükleniyor…</p>
+            <p className="p-6 text-sm text-slate-500">{t('overview.loading')}</p>
           ) : subjectTotals.length === 0 ? (
             <EmptyPanel
               icon={BookOpen}
-              title="Henüz ders verisi yok"
-              description="Kayıt ekledikçe ders bazındaki soru dağılımı burada görünecek."
+              title={t('overview.noSubjectData')}
+              description={t('overview.noSubjectDataDescription')}
             />
           ) : (
             <div className="space-y-5 p-5 sm:p-6">
@@ -374,7 +364,7 @@ export default function OverviewPage({
                         {subject.name}
                       </span>
                       <span className="ml-2 text-[10px] text-slate-400">
-                        {subject.examType}
+                        {subject.categoryId ? categoryNameById.get(subject.categoryId) ?? t('overview.uncategorized') : 'Kategorisiz'}
                       </span>
                     </div>
                     <span className="shrink-0 text-xs font-semibold tabular-nums text-slate-700">
@@ -399,7 +389,7 @@ export default function OverviewPage({
         <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white">
           <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
             <h2 className="text-sm font-semibold text-slate-900">
-              En çok çalışılan konular
+              {t('overview.topTopics')}
             </h2>
             <p className="mt-1 text-[11px] text-slate-500">
               Bu ay konu bazında çözülen sorular
@@ -407,12 +397,12 @@ export default function OverviewPage({
           </div>
 
           {loading ? (
-            <p className="p-6 text-sm text-slate-500">Veriler yükleniyor…</p>
+            <p className="p-6 text-sm text-slate-500">{t('overview.loading')}</p>
           ) : topTopics.length === 0 ? (
             <EmptyPanel
               icon={FileText}
-              title="Henüz konu verisi yok"
-              description="Çalışma konuların kaydedildikçe burada listelenecek."
+              title={t('overview.noTopicData')}
+              description={t('overview.noTopicDataDescription')}
             />
           ) : (
             <div className="divide-y divide-slate-100">
@@ -430,9 +420,8 @@ export default function OverviewPage({
                       {topic.topic}
                     </p>
                     <p className="mt-1 text-[10px] text-slate-500">
-                      {subjectById.get(topic.subjectId)?.name ?? 'Bilinmeyen ders'}
-                      {' · '}
-                      {topic.examType}
+                      {subjectById.get(topic.subjectId)?.name ?? t('overview.unknownSubject')}
+                      {subjectById.get(topic.subjectId)?.categoryId ? ` · ${categoryNameById.get(subjectById.get(topic.subjectId)!.categoryId!) ?? 'Kategorisiz'}` : ' · Kategorisiz'}
                     </p>
                   </div>
 
@@ -452,15 +441,15 @@ export default function OverviewPage({
       <section className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white">
         <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
           <h2 className="text-sm font-semibold text-slate-900">
-            Son 7 günlük çalışma
+            {t('overview.lastSevenDays')}
           </h2>
           <p className="mt-1 text-[11px] text-slate-500">
-            Günlere göre çözülen soru sayısı
+            {t('overview.dailyQuestionCounts')}
           </p>
         </div>
 
         {loading ? (
-          <p className="p-6 text-sm text-slate-500">Veriler yükleniyor…</p>
+          <p className="p-6 text-sm text-slate-500">{t('overview.loading')}</p>
         ) : (
           <div className="space-y-4 p-5 sm:p-6">
             {dailyHistory.map((day) => (
@@ -475,7 +464,7 @@ export default function OverviewPage({
                       : 'text-slate-500'
                   }`}
                 >
-                  {day.today ? 'Bugün' : day.label}
+                  {day.today ? t('overview.today') : day.label}
                 </span>
 
                 <div className="h-2 overflow-hidden rounded-full bg-slate-100">
@@ -500,10 +489,10 @@ export default function OverviewPage({
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 sm:px-6">
           <div>
             <h2 className="text-sm font-semibold text-slate-900">
-              Son çalışmalar
+              {t('overview.recentStudies')}
             </h2>
             <p className="mt-1 text-[11px] text-slate-500">
-              En son kaydedilen çalışma kayıtların
+              {t('overview.latestRecords')}
             </p>
           </div>
 
@@ -512,18 +501,18 @@ export default function OverviewPage({
             onClick={() => onNavigate('calendar')}
             className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#426b52] hover:text-[#244b38]"
           >
-            Takvimi aç
+            {t('overview.openCalendar')}
             <ArrowRight size={14} />
           </button>
         </div>
 
         {loading ? (
-          <p className="p-6 text-sm text-slate-500">Veriler yükleniyor…</p>
+          <p className="p-6 text-sm text-slate-500">{t('overview.loading')}</p>
         ) : recentRecords.length === 0 ? (
           <EmptyPanel
             icon={Clock3}
-            title="Henüz çalışma kaydı yok"
-            description="Takvimden bir gün seçip ilk kaydını eklediğinde geçmişin burada görünecek."
+            title={t('overview.noRecords')}
+            description={t('overview.noRecordsDescription')}
           />
         ) : (
           <div className="divide-y divide-slate-100">
@@ -535,13 +524,13 @@ export default function OverviewPage({
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-md bg-[#edf4ee] px-2 py-1 text-[10px] font-semibold text-[#315b3d]">
-                      {record.examType}
+                      {subjectById.get(record.subjectId)?.categoryId ? categoryNameById.get(subjectById.get(record.subjectId)!.categoryId!) ?? 'Kategorisiz' : 'Kategorisiz'}
                     </span>
                     <span className="text-[10px] text-slate-500">
                       {subjectById.get(record.subjectId)?.name ?? 'Bilinmeyen ders'}
                     </span>
                     <span className="text-[10px] text-slate-400">
-                      {formatRecordDate(record.date)}
+                      {formatRecordDate(record.date, language)}
                     </span>
                   </div>
                   <p className="mt-2 break-words text-sm font-medium text-slate-800">
@@ -555,9 +544,9 @@ export default function OverviewPage({
                 </div>
 
                 <p className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">
-                  {record.questionCount.toLocaleString('tr-TR')}
+                  {record.questionCount.toLocaleString(getNumberLocale(language))}
                   <span className="ml-1 text-[10px] font-normal text-slate-500">
-                    soru
+                    {t('overview.question')}
                   </span>
                 </p>
               </div>

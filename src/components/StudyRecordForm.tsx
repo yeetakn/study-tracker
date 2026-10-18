@@ -1,8 +1,9 @@
 import { BookOpen, Save, X } from 'lucide-react'
 import { useState } from 'react'
+import { useI18n } from '../localization/i18n'
 import type { SubmitEvent } from 'react'
 import type {
-  ExamType,
+  Category,
   Subject,
   StudyRecord,
   StudyRecordDraft,
@@ -11,6 +12,7 @@ import type {
 interface StudyRecordFormProps {
   defaultDate: string
   subjects: Subject[]
+  categories: Category[]
   initialRecord?: StudyRecord
   onSave: (
     draft: StudyRecordDraft,
@@ -27,19 +29,33 @@ const labelClass = 'text-xs font-medium text-slate-700'
 export default function StudyRecordForm({
   defaultDate,
   subjects,
+  categories,
   initialRecord,
   onSave,
   onCancel,
 }: StudyRecordFormProps) {
+  const { t } = useI18n()
   const [date, setDate] = useState(
     initialRecord?.date ?? defaultDate,
   )
-  const [examType, setExamType] = useState<ExamType>(
-    initialRecord?.examType ?? 'TYT',
+const [subjectId, setSubjectId] = useState(
+  initialRecord?.subjectId ?? '',
+)
+
+const UNCATEGORIZED_CATEGORY_ID = '__uncategorized__'
+
+const [selectedCategoryId, setSelectedCategoryId] = useState(() => {
+  const initialSubject = subjects.find(
+    (subject) => subject.id === initialRecord?.subjectId,
   )
-  const [subjectId, setSubjectId] = useState(
-    initialRecord?.subjectId ?? '',
+
+  return (
+    initialSubject?.categoryId ??
+    categories[0]?.id ??
+    UNCATEGORIZED_CATEGORY_ID
   )
+})
+
   const [topic, setTopic] = useState(initialRecord?.topic ?? '')
   const [source, setSource] = useState(initialRecord?.source ?? '')
   const [questionCount, setQuestionCount] = useState(
@@ -58,22 +74,19 @@ export default function StudyRecordForm({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  const availableSubjects = subjects.filter(
-    (subject) => subject.examType === examType,
-  )
-
-const selectedSubjectId = availableSubjects.some(
-  (subject) => subject.id === subjectId,
-)
-  ? subjectId
-  : (availableSubjects[0]?.id ?? '')
-
-  function changeExamType(nextType: ExamType) {
-    setExamType(nextType)
-    setSubjectId(
-      subjects.find((subject) => subject.examType === nextType)?.id ?? '',
-    )
+const availableSubjects = subjects.filter((subject) => {
+  if (selectedCategoryId === UNCATEGORIZED_CATEGORY_ID) {
+    return !subject.categoryId
   }
+
+  return subject.categoryId === selectedCategoryId
+})
+
+  const selectedSubjectId = availableSubjects.some(
+    (subject) => subject.id === subjectId,
+  )
+    ? subjectId
+    : (availableSubjects[0]?.id ?? '')
 
   function parseOptionalCount(
     value: string,
@@ -84,7 +97,7 @@ const selectedSubjectId = availableSubjects.some(
     const parsed = Number(value)
 
     if (!Number.isInteger(parsed) || parsed < 0) {
-      throw new Error(`${fieldName} negatif olmayan bir tam sayı olmalıdır.`)
+      throw new Error(t('recordForm.invalidCount').replace('{field}', fieldName))
     }
 
     return parsed
@@ -99,32 +112,41 @@ const selectedSubjectId = availableSubjects.some(
     try {
     setSaving(true)
       if (!date) {
-        throw new Error('Çalışma tarihi seçmelisin.')
+        throw new Error(t('recordForm.dateRequired'))
       }
 
       if (!selectedSubjectId) {
-      throw new Error('Bu sınav türü için önce bir ders gerekli.')
+        throw new Error(t('recordForm.subjectRequired'))
       }
 
       if (!topic.trim()) {
-        throw new Error('Çalışılan konuyu girmelisin.')
+        throw new Error(t('recordForm.topicRequired'))
       }
 
       if (questionCount.trim() === '') {
-        throw new Error('Çözülen soru sayısını girmelisin.')
+        throw new Error(t('recordForm.questionCountRequired'))
       }
 
       const total = Number(questionCount)
 
       if (!Number.isInteger(total) || total < 0) {
         throw new Error(
-          'Çözülen soru sayısı negatif olmayan bir tam sayı olmalıdır.',
+          t('recordForm.invalidQuestionCount'),
         )
       }
 
-      const correct = parseOptionalCount(correctCount, 'Doğru sayısı')
-      const incorrect = parseOptionalCount(incorrectCount, 'Yanlış sayısı')
-      const blank = parseOptionalCount(blankCount, 'Boş sayısı')
+      const correct = parseOptionalCount(
+        correctCount,
+        t('recordForm.correctCount'),
+      )
+      const incorrect = parseOptionalCount(
+        incorrectCount,
+        t('recordForm.incorrectCount'),
+      )
+      const blank = parseOptionalCount(
+        blankCount,
+        t('recordForm.blankCount'),
+      )
 
       const enteredCounts = [correct, incorrect, blank].filter(
         (value): value is number => value !== undefined,
@@ -132,14 +154,13 @@ const selectedSubjectId = availableSubjects.some(
 
       if (enteredCounts.reduce((sum, value) => sum + value, 0) > total) {
         throw new Error(
-          'Doğru, yanlış ve boş sayılarının toplamı çözülen soru sayısını aşamaz.',
+          t('recordForm.distributionExceedsTotal'),
         )
       }
 
 await onSave(
   {
     date,
-    examType,
     subjectId: selectedSubjectId,
     topic: topic.trim(),
     source: source.trim() || undefined,
@@ -155,7 +176,7 @@ await onSave(
       setError(
         caught instanceof Error
           ? caught.message
-          : 'Kayıt kaydedilemedi. Tekrar deneyebilirsin.',
+          : t('recordForm.saveFailed'),
       )
     } finally {
         setSaving(false)
@@ -172,10 +193,10 @@ await onSave(
 
           <div>
             <h3 className="text-sm font-semibold text-slate-900">
-              {initialRecord ? 'Kaydı düzenle' : 'Yeni çalışma kaydı'}
+              {initialRecord ? t('recordForm.editTitle') : t('recordForm.newTitle')}
             </h3>
             <p className="mt-1 text-[11px] text-slate-500">
-              Alanları doldurup çalışmanı kaydet.
+              {t('recordForm.description')}
             </p>
           </div>
         </div>
@@ -183,7 +204,7 @@ await onSave(
         <button
           type="button"
           onClick={onCancel}
-          aria-label="Formu kapat"
+          aria-label={t('recordForm.closeForm')}
           className="flex size-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
         >
           <X size={17} />
@@ -193,7 +214,7 @@ await onSave(
       <div className="space-y-4">
         <div>
           <label htmlFor="record-date" className={labelClass}>
-            Çalışma tarihi
+            {t('recordForm.date')}
           </label>
           <input
             id="record-date"
@@ -205,55 +226,66 @@ await onSave(
           />
         </div>
 
-        <div>
-          <label htmlFor="record-exam" className={labelClass}>
-            Sınav türü
-          </label>
-          <select
-            id="record-exam"
-            value={examType}
-            onChange={(event) =>
-              changeExamType(event.target.value as ExamType)
-            }
-            className={inputClass}
-          >
-            <option value="TYT">TYT</option>
-            <option value="AYT">AYT</option>
-          </select>
-        </div>
 
-        <div>
-          <label htmlFor="record-subject" className={labelClass}>
-            Ders
-          </label>
-          <select
-            id="record-subject"
-            value={selectedSubjectId}
-            onChange={(event) => setSubjectId(event.target.value)}
-            required
-            disabled={availableSubjects.length === 0}
-            className={inputClass}
-          >
-            <option value="" disabled>
-              Ders seç
-            </option>
-            {availableSubjects.map((subject) => (
-              <option key={subject.id} value={subject.id}>
-                {subject.name}
-              </option>
-            ))}
-          </select>
-        </div>
+<div>
+  <label htmlFor="record-category" className={labelClass}>
+    {t('recordForm.category')}
+  </label>
+  <select
+    id="record-category"
+    value={selectedCategoryId}
+    onChange={(event) => {
+      setSelectedCategoryId(event.target.value)
+      setSubjectId('')
+    }}
+    className={inputClass}
+  >
+    {categories.map((category) => (
+      <option key={category.id} value={category.id}>
+        {category.name}
+      </option>
+    ))}
+    <option value={UNCATEGORIZED_CATEGORY_ID}>
+      {t('recordForm.uncategorized')}
+    </option>
+  </select>
+</div>
+
+<div>
+  <label htmlFor="record-subject" className={labelClass}>
+    {t('recordForm.subject')}
+  </label>
+  <select
+    id="record-subject"
+    value={selectedSubjectId}
+    onChange={(event) => setSubjectId(event.target.value)}
+    required
+    disabled={availableSubjects.length === 0}
+    className={inputClass}
+  >
+    <option value="" disabled>
+      {availableSubjects.length === 0
+        ? t('recordForm.noSubjectsInCategory')
+        : t('recordForm.selectSubject')}
+    </option>
+    {availableSubjects.map((subject) => (
+      <option key={subject.id} value={subject.id}>
+        {subject.name}
+      </option>
+    ))}
+  </select>
+</div>
+
 
         <div>
           <label htmlFor="record-topic" className={labelClass}>
-            Konu
+            {t('recordForm.topic')}
           </label>
           <input
             id="record-topic"
             value={topic}
             onChange={(event) => setTopic(event.target.value)}
-            placeholder="Örn. Problemler"
+            placeholder={t('recordForm.topicPlaceholder')}
             required
             maxLength={150}
             className={inputClass}
@@ -262,13 +294,13 @@ await onSave(
 
         <div>
           <label htmlFor="record-source" className={labelClass}>
-            Kaynak / test adı <span className="font-normal text-slate-400">(isteğe bağlı)</span>
+            {t('recordForm.source')} <span className="font-normal text-slate-400">({t('recordForm.optional')})</span>
           </label>
           <input
             id="record-source"
             value={source}
             onChange={(event) => setSource(event.target.value)}
-            placeholder="Örn. Deneme 4, Test 12"
+            placeholder={t('recordForm.sourcePlaceholder')}
             maxLength={150}
             className={inputClass}
           />
@@ -276,7 +308,7 @@ await onSave(
 
         <div>
           <label htmlFor="record-total" className={labelClass}>
-            Çözülen soru sayısı
+            {t('recordForm.questionCount')}
           </label>
           <input
             id="record-total"
@@ -286,7 +318,7 @@ await onSave(
             inputMode="numeric"
             value={questionCount}
             onChange={(event) => setQuestionCount(event.target.value)}
-            placeholder="Örn. 40"
+            placeholder={t('recordForm.questionCountPlaceholder')}
             required
             className={inputClass}
           />
@@ -294,12 +326,12 @@ await onSave(
 
         <div>
           <p className={labelClass}>
-            Sonuç dağılımı <span className="font-normal text-slate-400">(isteğe bağlı)</span>
+            {t('recordForm.resultDistribution')} <span className="font-normal text-slate-400">({t('recordForm.optional')})</span>
           </p>
           <div className="mt-1.5 grid grid-cols-3 gap-2">
             <div>
               <label htmlFor="record-correct" className="text-[11px] text-slate-500">
-                Doğru
+                {t('recordForm.correctCount')}
               </label>
               <input
                 id="record-correct"
@@ -316,7 +348,7 @@ await onSave(
 
             <div>
               <label htmlFor="record-incorrect" className="text-[11px] text-slate-500">
-                Yanlış
+                {t('recordForm.incorrectCount')}
               </label>
               <input
                 id="record-incorrect"
@@ -333,7 +365,7 @@ await onSave(
 
             <div>
               <label htmlFor="record-blank" className="text-[11px] text-slate-500">
-                Boş
+                {t('recordForm.blankCount')}
               </label>
               <input
                 id="record-blank"
@@ -352,13 +384,13 @@ await onSave(
 
         <div>
           <label htmlFor="record-notes" className={labelClass}>
-            Notlar <span className="font-normal text-slate-400">(isteğe bağlı)</span>
+            {t('recordForm.notes')} <span className="font-normal text-slate-400">({t('recordForm.optional')})</span>
           </label>
           <textarea
             id="record-notes"
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
-            placeholder="Çalışmayla ilgili kısa not..."
+            placeholder={t('recordForm.notesPlaceholder')}
             rows={3}
             maxLength={2000}
             className={inputClass}
@@ -382,7 +414,7 @@ await onSave(
           disabled={saving}
           className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
         >
-          Vazgeç
+          {t('recordForm.cancel')}
         </button>
 
         <button
@@ -391,7 +423,7 @@ await onSave(
           className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#244b38] px-3 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-[#193b2a] disabled:cursor-not-allowed disabled:opacity-60"
         >
           <Save size={15} />
-          {saving ? 'Kaydediliyor…' : initialRecord ? 'Değişiklikleri kaydet' : 'Kaydı kaydet'}
+          {saving ? t('recordForm.saving') : initialRecord ? t('recordForm.saveChanges') : t('recordForm.saveRecord')}
         </button>
       </div>
     </form>

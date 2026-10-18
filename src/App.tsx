@@ -1,3 +1,8 @@
+import {
+  useI18n,
+  type Language,
+  type TranslationKey,
+} from './localization/i18n'
 import { useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import ReportsPage from './pages/ReportsPage'
@@ -15,37 +20,40 @@ import {
 } from 'lucide-react'
 
 
+
 type PageId = 'overview' | 'calendar' | 'reports' | 'settings'
 
 type NavigationItem = {
   id: PageId
-  label: string
+  labelKey: TranslationKey
   icon: LucideIcon
 }
 
 const navigation: NavigationItem[] = [
-  { id: 'overview', label: 'Genel Bakış', icon: LayoutDashboard },
-  { id: 'calendar', label: 'Takvim', icon: CalendarDays },
-  { id: 'reports', label: 'Raporlar', icon: FileText },
-  { id: 'settings', label: 'Ayarlar / Yedekleme', icon: Settings },
+  { id: 'overview', labelKey: 'app.nav.overview', icon: LayoutDashboard },
+  { id: 'calendar', labelKey: 'app.nav.calendar', icon: CalendarDays },
+  { id: 'reports', labelKey: 'app.nav.reports', icon: FileText },
+  { id: 'settings', labelKey: 'app.nav.settings', icon: Settings },
 ]
 
-const pageDescriptions: Record<PageId, string> = {
-  overview: 'Çalışmalarının genel görünümü.',
-  calendar: 'Günlerini seç, çalışmalarını kaydet.',
-  reports: 'Çalışma geçmişini düzenli raporlara dönüştür.',
-  settings: 'Verilerini yönet ve yedeklerini güvenle sakla.',
+const pageDescriptions: Record<PageId, TranslationKey> = {
+  overview: 'app.desc.overview',
+  calendar: 'app.desc.calendar',
+  reports: 'app.desc.reports',
+  settings: 'app.desc.settings',
 }
 
-function getTodayLabel() {
-  const formatted = new Intl.DateTimeFormat('tr-TR', {
+function getTodayLabel(language: Language) {
+  const locale = language === 'tr' ? 'tr-TR' : 'en-US'
+
+  const formatted = new Intl.DateTimeFormat(locale, {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
     year: 'numeric',
   }).format(new Date())
 
-  return formatted.charAt(0).toLocaleUpperCase('tr-TR') + formatted.slice(1)
+  return formatted.charAt(0).toLocaleUpperCase(locale) + formatted.slice(1)
 }
 
 function Sidebar({
@@ -55,6 +63,8 @@ function Sidebar({
   activePage: PageId
   onNavigate: (page: PageId) => void
 }) {
+  const { t } = useI18n()
+
   return (
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-[264px] flex-col bg-[#172438] text-white lg:flex">
       <div className="flex items-center gap-3 px-6 py-7">
@@ -96,7 +106,7 @@ function Sidebar({
               }`}
             >
               <Icon size={18} strokeWidth={1.8} />
-              <span>{item.label}</span>
+              <span>{t(item.labelKey)}</span>
 
               {isActive && (
                 <ChevronRight className="ml-auto" size={16} />
@@ -138,6 +148,7 @@ function MobileNavigation({
   activePage: PageId
   onNavigate: (page: PageId) => void
 }) {
+  const { t } = useI18n()
   return (
     <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur lg:hidden">
       <div className="mb-3 flex items-center gap-2.5">
@@ -170,7 +181,7 @@ function MobileNavigation({
               }`}
             >
               <Icon size={15} />
-              {item.label}
+              {t(item.labelKey)}
             </button>
           )
         })}
@@ -240,6 +251,7 @@ function PlaceholderPage({
   page: Exclude<PageId, 'overview'>
   onNavigate: (page: PageId) => void
 }) {
+  const { t } = useI18n()
   if (page === 'calendar') {
     return <CalendarPage />
   }
@@ -274,10 +286,10 @@ function PlaceholderPage({
         </div>
         <div>
           <h2 className="text-base font-semibold text-slate-900">
-            {item.label}
+            {t(item.labelKey)}
           </h2>
           <p className="mt-1 text-xs text-slate-500">
-            {pageDescriptions[page]}
+            {t(pageDescriptions[page])}
           </p>
         </div>
       </div>
@@ -296,6 +308,7 @@ function PlaceholderPage({
 }
 
 function App() {
+  const { t, language } = useI18n()
   const [activePage, setActivePage] = useState<PageId>('overview')
   const activeItem = navigation.find((item) => item.id === activePage)!
 
@@ -308,18 +321,19 @@ function App() {
         onNavigate={setActivePage}
       />
 
+
       <main className="min-w-0 lg:pl-[264px]">
         <header className="border-b border-slate-200/80 bg-white/80 px-5 py-5 sm:px-8 lg:px-10">
           <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-4">
             <div>
               <p className="text-[11px] font-medium text-slate-500">
-                {getTodayLabel()}
+                {getTodayLabel(language)}
               </p>
               <h1 className="mt-1 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
-                {activeItem.label}
+                {t(activeItem.labelKey)}
               </h1>
               <p className="mt-1 text-xs text-slate-500">
-                {pageDescriptions[activePage]}
+                {t(pageDescriptions[activePage])}
               </p>
             </div>
 

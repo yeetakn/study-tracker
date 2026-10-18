@@ -32,11 +32,14 @@ The current version does not require a user account, remote server, or cloud ser
 - Dashboard with study summaries and statistics
 - Study record creation, editing, and deletion
 - Calendar-based study history
-- Subject management
+- User-defined categories and subjects
 - Reports for daily, weekly, biweekly, monthly, and custom date ranges
 - PDF report export
 - JSON data backup and restore
 - Explicitly confirmed local data reset
+- Turkish and English interface localization
+- Automatic initial language selection based on browser language
+- Persistent language preference
 
 ## Technology Stack
 
@@ -107,7 +110,7 @@ Choose one of the following methods.
 Install Git from https://git-scm.com/ if necessary. Then run the following command, replacing the placeholder with the actual repository URL:
 
 ```bash
-git clone <REPOSITORY_URL>
+git clone https://github.com/yeetakn/study-tracker.git
 ```
 
 Open the directory created by Git.

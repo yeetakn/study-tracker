@@ -2,6 +2,7 @@ import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type { BackupPayload, BackupImportResult } from '../types/backup'
 import type {
   AppSetting,
+  Category,
   ExamType,
   Subject,
   StudyRecord,
@@ -9,14 +10,18 @@ import type {
 } from '../types/study'
 
 interface StudyDatabase extends DBSchema {
+  categories: {
+    key: string
+    value: Category
+  }
   subjects: {
     key: string
     value: Subject
     indexes: {
       'by-exam-type': ExamType
+      'by-category': string
     }
   }
-
   records: {
     key: string
     value: StudyRecord
@@ -25,7 +30,6 @@ interface StudyDatabase extends DBSchema {
       'by-subject': string
     }
   }
-
   settings: {
     key: string
     value: AppSetting
@@ -33,28 +37,9 @@ interface StudyDatabase extends DBSchema {
 }
 
 const DATABASE_NAME = 'calisma-defteri'
-const DATABASE_VERSION = 1
-
-const defaultSubjects: Array<{
-  id: string
-  name: string
-  examType: ExamType
-}> = [
-  { id: 'tyt-turkce', name: 'Türkçe', examType: 'TYT' },
-  { id: 'tyt-tarih', name: 'Tarih', examType: 'TYT' },
-  { id: 'tyt-cografya', name: 'Coğrafya', examType: 'TYT' },
-  { id: 'tyt-felsefe', name: 'Felsefe', examType: 'TYT' },
-  { id: 'tyt-din', name: 'Din Kültürü', examType: 'TYT' },
-  { id: 'tyt-matematik', name: 'Matematik', examType: 'TYT' },
-  { id: 'tyt-fizik', name: 'Fizik', examType: 'TYT' },
-  { id: 'tyt-kimya', name: 'Kimya', examType: 'TYT' },
-  { id: 'tyt-biyoloji', name: 'Biyoloji', examType: 'TYT' },
-
-  { id: 'ayt-matematik', name: 'Matematik', examType: 'AYT' },
-  { id: 'ayt-fizik', name: 'Fizik', examType: 'AYT' },
-  { id: 'ayt-kimya', name: 'Kimya', examType: 'AYT' },
-  { id: 'ayt-biyoloji', name: 'Biyoloji', examType: 'AYT' },
-]
+const DATABASE_VERSION = 2
+export const LEGACY_TYT_CATEGORY_ID = 'legacy-tyt'
+export const LEGACY_AYT_CATEGORY_ID = 'legacy-ayt'
 
 let databasePromise: Promise<IDBPDatabase<StudyDatabase>> | undefined
 
@@ -66,43 +51,82 @@ function createId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+function makeLegacyCategory(id: string, name: string, now: string): Category {
+  return { id, name, createdAt: now, updatedAt: now }
+}
+
 function openDatabase(): Promise<IDBPDatabase<StudyDatabase>> {
   if (!databasePromise) {
     databasePromise = openDB<StudyDatabase>(
       DATABASE_NAME,
       DATABASE_VERSION,
       {
-        upgrade(db) {
+        upgrade(db, oldVersion, _newVersion, tx) {
+          if (!db.objectStoreNames.contains('categories')) {
+            db.createObjectStore('categories', { keyPath: 'id' })
+          }
+
           if (!db.objectStoreNames.contains('subjects')) {
-            const store = db.createObjectStore('subjects', {
-              keyPath: 'id',
-            })
-
+            const store = db.createObjectStore('subjects', { keyPath: 'id' })
             store.createIndex('by-exam-type', 'examType')
-
-            const now = new Date().toISOString()
-
-            for (const subject of defaultSubjects) {
-              store.add({
-                ...subject,
-                createdAt: now,
-              })
+            store.createIndex('by-category', 'categoryId')
+          } else {
+            const store = tx.objectStore('subjects')
+            if (!store.indexNames.contains('by-exam-type')) {
+              store.createIndex('by-exam-type', 'examType')
+            }
+            if (!store.indexNames.contains('by-category')) {
+              store.createIndex('by-category', 'categoryId')
             }
           }
 
           if (!db.objectStoreNames.contains('records')) {
-            const store = db.createObjectStore('records', {
-              keyPath: 'id',
-            })
-
+            const store = db.createObjectStore('records', { keyPath: 'id' })
             store.createIndex('by-date', 'date')
             store.createIndex('by-subject', 'subjectId')
+          } else {
+            const store = tx.objectStore('records')
+            if (!store.indexNames.contains('by-date')) {
+              store.createIndex('by-date', 'date')
+            }
+            if (!store.indexNames.contains('by-subject')) {
+              store.createIndex('by-subject', 'subjectId')
+            }
           }
 
           if (!db.objectStoreNames.contains('settings')) {
-            db.createObjectStore('settings', {
-              keyPath: 'key',
-            })
+            db.createObjectStore('settings', { keyPath: 'key' })
+          }
+
+          // Version 1 users have TYT/AYT subjects. Preserve every existing ID,
+          // timestamp and record relationship while mapping their subjects to
+          // editable category records. A fresh database (oldVersion === 0)
+          // deliberately starts with no categories and no subjects.
+          if (oldVersion > 0 && oldVersion < 2) {
+            const now = new Date().toISOString()
+            const categoryStore = tx.objectStore('categories')
+            categoryStore.put(
+              makeLegacyCategory(LEGACY_TYT_CATEGORY_ID, 'TYT', now),
+            )
+            categoryStore.put(
+              makeLegacyCategory(LEGACY_AYT_CATEGORY_ID, 'AYT', now),
+            )
+
+            const subjectStore = tx.objectStore('subjects')
+            const migrateExistingSubjects = async () => {
+              let cursor = await subjectStore.openCursor()
+              while (cursor) {
+                const subject = cursor.value as Subject
+                const categoryId =
+                  subject.examType === 'AYT'
+                    ? LEGACY_AYT_CATEGORY_ID
+                    : LEGACY_TYT_CATEGORY_ID
+
+                await cursor.update({ ...subject, categoryId })
+                cursor = await cursor.continue()
+              }
+            }
+            void migrateExistingSubjects()
           }
         },
       },
@@ -115,15 +139,117 @@ function openDatabase(): Promise<IDBPDatabase<StudyDatabase>> {
   return databasePromise
 }
 
+export async function getCategories(): Promise<Category[]> {
+  const db = await openDatabase()
+  return (await db.getAll('categories')).sort((a, b) =>
+    a.name.localeCompare(b.name, 'tr'),
+  )
+}
+
+export async function addCategory(name: string): Promise<Category> {
+  const trimmedName = name.trim()
+  if (!trimmedName) throw new Error('Kategori adı boş olamaz.')
+  if (trimmedName.length > 80) {
+    throw new Error('Kategori adı en fazla 80 karakter olabilir.')
+  }
+
+  const db = await openDatabase()
+  const categories = await db.getAll('categories')
+  const normalized = trimmedName.toLocaleLowerCase('tr-TR')
+  if (
+    categories.some(
+      (category) =>
+        category.name.trim().toLocaleLowerCase('tr-TR') === normalized,
+    )
+  ) {
+    throw new Error('Bu isimde bir kategori zaten var.')
+  }
+
+  const now = new Date().toISOString()
+  const category: Category = {
+    id: createId(),
+    name: trimmedName,
+    createdAt: now,
+    updatedAt: now,
+  }
+  await db.add('categories', category)
+  return category
+}
+
+export async function renameCategory(
+  id: string,
+  name: string,
+): Promise<Category> {
+  const trimmedName = name.trim()
+  if (!trimmedName) throw new Error('Kategori adı boş olamaz.')
+  if (trimmedName.length > 80) {
+    throw new Error('Kategori adı en fazla 80 karakter olabilir.')
+  }
+
+  const db = await openDatabase()
+  const category = await db.get('categories', id)
+  if (!category) throw new Error('Kategori bulunamadı.')
+
+  const normalized = trimmedName.toLocaleLowerCase('tr-TR')
+  const categories = await db.getAll('categories')
+  if (
+    categories.some(
+      (item) =>
+        item.id !== id &&
+        item.name.trim().toLocaleLowerCase('tr-TR') === normalized,
+    )
+  ) {
+    throw new Error('Bu isimde bir kategori zaten var.')
+  }
+
+  const updated: Category = {
+    ...category,
+    name: trimmedName,
+    updatedAt: new Date().toISOString(),
+  }
+  await db.put('categories', updated)
+  return updated
+}
+
+export async function deleteCategory(id: string): Promise<number> {
+  const db = await openDatabase()
+  const tx = db.transaction(['categories', 'subjects'], 'readwrite')
+  const categoryStore = tx.objectStore('categories')
+  const subjectStore = tx.objectStore('subjects')
+  const category = await categoryStore.get(id)
+
+  if (!category) {
+    await tx.done
+    throw new Error('Kategori bulunamadı.')
+  }
+
+  const subjects = await subjectStore.getAll()
+  const attached = subjects.filter((subject) => subject.categoryId === id)
+  for (const subject of attached) {
+    const updated: Subject = { ...subject }
+    delete updated.categoryId
+    delete updated.examType
+    await subjectStore.put(updated)
+  }
+
+  await categoryStore.delete(id)
+  await tx.done
+  return attached.length
+}
+
 export async function getSubjects(): Promise<Subject[]> {
   const db = await openDatabase()
-  const subjects = await db.getAll('subjects')
+  const [subjects, categories] = await Promise.all([
+    db.getAll('subjects'),
+    db.getAll('categories'),
+  ])
+  const categoryNames = new Map(categories.map((category) => [category.id, category.name]))
 
   return subjects.sort((a, b) => {
-    if (a.examType !== b.examType) {
-      return a.examType === 'TYT' ? -1 : 1
-    }
-
+    const categoryA = categoryNames.get(a.categoryId ?? '') ?? '\uffff'
+    const categoryB = categoryNames.get(b.categoryId ?? '') ?? '\uffff'
+    const categoryOrder = categoryA.localeCompare(categoryB, 'tr')
+    if (categoryOrder !== 0) return categoryOrder
     return a.name.localeCompare(b.name, 'tr')
   })
 }
@@ -132,13 +258,7 @@ export async function getStudyRecordsByDate(
   date: string,
 ): Promise<StudyRecord[]> {
   const db = await openDatabase()
-
-  const records = await db.getAllFromIndex(
-    'records',
-    'by-date',
-    date,
-  )
-
+  const records = await db.getAllFromIndex('records', 'by-date', date)
   return records.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 
@@ -149,9 +269,7 @@ export async function getStudyRecordsForDateRange(
   if (startDate > endDate) {
     throw new Error('Başlangıç tarihi bitiş tarihinden sonra olamaz.')
   }
-
   const db = await openDatabase()
-
   return db.getAllFromIndex(
     'records',
     'by-date',
@@ -164,20 +282,26 @@ export async function getAllStudyRecords(): Promise<StudyRecord[]> {
   return db.getAll('records')
 }
 
+function legacyExamTypeForCategory(categoryId?: string): ExamType | undefined {
+  if (categoryId === LEGACY_TYT_CATEGORY_ID) return 'TYT'
+  if (categoryId === LEGACY_AYT_CATEGORY_ID) return 'AYT'
+  return undefined
+}
+
 export async function saveStudyRecord(
   draft: StudyRecordDraft,
   existingRecord?: StudyRecord,
 ): Promise<StudyRecord> {
   const db = await openDatabase()
-
   const subject = await db.get('subjects', draft.subjectId)
+  if (!subject) throw new Error('Seçilen ders bulunamadı.')
 
-  if (!subject) {
-    throw new Error('Seçilen ders bulunamadı.')
-  }
-
-  if (subject.examType !== draft.examType) {
-    throw new Error('Seçilen ders, sınav türüyle eşleşmiyor.')
+  if (
+    draft.examType &&
+    subject.examType &&
+    subject.examType !== draft.examType
+  ) {
+    throw new Error('Seçilen ders, eski sınav türüyle eşleşmiyor.')
   }
 
   if (
@@ -186,25 +310,13 @@ export async function saveStudyRecord(
   ) {
     throw new Error('Geçerli bir çalışma tarihi girilmelidir.')
   }
-
-  if (
-    !Number.isInteger(draft.questionCount) ||
-    draft.questionCount < 0
-  ) {
+  if (!Number.isInteger(draft.questionCount) || draft.questionCount < 0) {
     throw new Error('Soru sayısı negatif olmayan bir tam sayı olmalıdır.')
   }
 
-  const counts = [
-    draft.correctCount,
-    draft.incorrectCount,
-    draft.blankCount,
-  ]
-
+  const counts = [draft.correctCount, draft.incorrectCount, draft.blankCount]
   for (const count of counts) {
-    if (
-      count !== undefined &&
-      (!Number.isInteger(count) || count < 0)
-    ) {
+    if (count !== undefined && (!Number.isInteger(count) || count < 0)) {
       throw new Error('Doğru, yanlış ve boş sayıları negatif olamaz.')
     }
   }
@@ -212,7 +324,6 @@ export async function saveStudyRecord(
   const enteredCounts = counts.filter(
     (count): count is number => count !== undefined,
   )
-
   if (
     enteredCounts.length > 0 &&
     enteredCounts.reduce((total, count) => total + count, 0) >
@@ -224,22 +335,19 @@ export async function saveStudyRecord(
   }
 
   const now = new Date().toISOString()
-
+  const examType = legacyExamTypeForCategory(subject.categoryId)
   const record: StudyRecord = {
     ...draft,
+    examType,
     id: existingRecord?.id ?? createId(),
     createdAt: existingRecord?.createdAt ?? now,
     updatedAt: now,
   }
-
   await db.put('records', record)
-
   return record
 }
 
-export async function deleteStudyRecord(
-  id: string,
-): Promise<void> {
+export async function deleteStudyRecord(id: string): Promise<void> {
   const db = await openDatabase()
   await db.delete('records', id)
 }
@@ -254,53 +362,85 @@ export async function saveSetting(
   value: AppSetting['value'],
 ): Promise<void> {
   const db = await openDatabase()
-
-  await db.put('settings', {
-    key,
-    value,
-    updatedAt: new Date().toISOString(),
-  })
+  await db.put('settings', { key, value, updatedAt: new Date().toISOString() })
 }
 
 export async function addSubject(
   name: string,
-  examType: ExamType,
+  categoryId?: string,
 ): Promise<Subject> {
   const trimmedName = name.trim()
-
-  if (!trimmedName) {
-    throw new Error('Ders adı boş olamaz.')
-  }
-
+  if (!trimmedName) throw new Error('Ders adı boş olamaz.')
   if (trimmedName.length > 80) {
     throw new Error('Ders adı en fazla 80 karakter olabilir.')
   }
 
   const db = await openDatabase()
-  const subjects = await db.getAll('subjects')
+  const [subjects, category] = await Promise.all([
+    db.getAll('subjects'),
+    categoryId ? db.get('categories', categoryId) : Promise.resolve(undefined),
+  ])
+  if (categoryId && !category) throw new Error('Seçilen kategori bulunamadı.')
 
-  const normalizedName = trimmedName.toLocaleLowerCase('tr-TR')
-
-  const duplicate = subjects.some(
-    (subject) =>
-      subject.examType === examType &&
-      subject.name.toLocaleLowerCase('tr-TR') === normalizedName,
-  )
-
-  if (duplicate) {
-    throw new Error('Bu sınav türünde aynı isimli bir ders zaten var.')
+  const normalized = trimmedName.toLocaleLowerCase('tr-TR')
+  if (
+    subjects.some(
+      (subject) =>
+        (subject.categoryId ?? '') === (categoryId ?? '') &&
+        subject.name.trim().toLocaleLowerCase('tr-TR') === normalized,
+    )
+  ) {
+    throw new Error('Bu kategoride aynı isimli bir ders zaten var.')
   }
 
   const subject: Subject = {
     id: createId(),
     name: trimmedName,
-    examType,
+    ...(categoryId ? { categoryId } : {}),
+    ...(legacyExamTypeForCategory(categoryId)
+      ? { examType: legacyExamTypeForCategory(categoryId) }
+      : {}),
     createdAt: new Date().toISOString(),
   }
-
   await db.add('subjects', subject)
-
   return subject
+}
+
+export async function updateSubjectCategory(
+  id: string,
+  categoryId?: string,
+): Promise<Subject> {
+  const db = await openDatabase()
+  const subject = await db.get('subjects', id)
+  if (!subject) throw new Error('Ders bulunamadı.')
+
+  if (categoryId && !(await db.get('categories', categoryId))) {
+    throw new Error('Seçilen kategori bulunamadı.')
+  }
+
+  const allSubjects = await db.getAll('subjects')
+  const normalizedName = subject.name.trim().toLocaleLowerCase('tr-TR')
+  if (
+    allSubjects.some(
+      (item) =>
+        item.id !== id &&
+        (item.categoryId ?? '') === (categoryId ?? '') &&
+        item.name.trim().toLocaleLowerCase('tr-TR') === normalizedName,
+    )
+  ) {
+    throw new Error('Bu kategoride aynı isimli bir ders zaten var.')
+  }
+
+  const updated: Subject = { ...subject }
+  if (categoryId) updated.categoryId = categoryId
+  else delete updated.categoryId
+
+  const legacyType = legacyExamTypeForCategory(categoryId)
+  if (legacyType) updated.examType = legacyType
+  else delete updated.examType
+
+  await db.put('subjects', updated)
+  return updated
 }
 
 export async function renameSubject(
@@ -308,52 +448,38 @@ export async function renameSubject(
   name: string,
 ): Promise<Subject> {
   const trimmedName = name.trim()
-
-  if (!trimmedName) {
-    throw new Error('Ders adı boş olamaz.')
-  }
-
+  if (!trimmedName) throw new Error('Ders adı boş olamaz.')
   if (trimmedName.length > 80) {
     throw new Error('Ders adı en fazla 80 karakter olabilir.')
   }
 
   const db = await openDatabase()
   const subject = await db.get('subjects', id)
+  if (!subject) throw new Error('Ders bulunamadı.')
 
-  if (!subject) {
-    throw new Error('Ders bulunamadı.')
-  }
-
-  const normalizedName = trimmedName.toLocaleLowerCase('tr-TR')
+  const normalized = trimmedName.toLocaleLowerCase('tr-TR')
   const subjects = await db.getAll('subjects')
-
-  const duplicate = subjects.some(
-    (item) =>
-      item.id !== id &&
-      item.examType === subject.examType &&
-      item.name.toLocaleLowerCase('tr-TR') === normalizedName,
-  )
-
-  if (duplicate) {
-    throw new Error('Bu sınav türünde aynı isimli bir ders zaten var.')
+  if (
+    subjects.some(
+      (item) =>
+        item.id !== id &&
+        (item.categoryId ?? '') === (subject.categoryId ?? '') &&
+        item.name.trim().toLocaleLowerCase('tr-TR') === normalized,
+    )
+  ) {
+    throw new Error('Bu kategoride aynı isimli bir ders zaten var.')
   }
 
-  const updatedSubject: Subject = {
-    ...subject,
-    name: trimmedName,
-  }
-
-  await db.put('subjects', updatedSubject)
-
-  return updatedSubject
+  const updated: Subject = { ...subject, name: trimmedName }
+  await db.put('subjects', updated)
+  return updated
 }
+
 export async function deleteSubject(id: string): Promise<void> {
   const db = await openDatabase()
-
   const tx = db.transaction(['subjects', 'records'], 'readwrite')
   const subjectStore = tx.objectStore('subjects')
   const recordStore = tx.objectStore('records')
-
   const [subject, linkedRecordCount] = await Promise.all([
     subjectStore.get(id),
     recordStore.index('by-subject').count(id),
@@ -363,14 +489,12 @@ export async function deleteSubject(id: string): Promise<void> {
     await tx.done
     throw new Error('Ders bulunamadı.')
   }
-
   if (linkedRecordCount > 0) {
     await tx.done
     throw new Error(
-      `Bu derse ait ${linkedRecordCount} çalışma kaydı var. Geçmişi korumak için önce bu kayıtları düzenle veya sil.`,
+      `Bu derse ait ${linkedRecordCount} çalışma kaydı var. Geçmişi korumak için önce kayıtları düzenle veya sil.`,
     )
   }
-
   await subjectStore.delete(id)
   await tx.done
 }
@@ -379,76 +503,90 @@ export async function mergeBackupData(
   data: BackupPayload['data'],
 ): Promise<BackupImportResult> {
   const db = await openDatabase()
-
   const tx = db.transaction(
-    ['subjects', 'records', 'settings'],
+    ['categories', 'subjects', 'records', 'settings'],
     'readwrite',
   )
 
   try {
+    const categoryStore = tx.objectStore('categories')
     const subjectStore = tx.objectStore('subjects')
     const recordStore = tx.objectStore('records')
     const settingsStore = tx.objectStore('settings')
-
-    const [currentSubjects, currentRecords, currentSettings] =
+    const [currentCategories, currentSubjects, currentRecords, currentSettings] =
       await Promise.all([
+        categoryStore.getAll(),
         subjectStore.getAll(),
         recordStore.getAll(),
         settingsStore.getAll(),
       ])
 
+    const knownCategories = [...currentCategories]
+    const categoryIdMap = new Map<string, string>()
+    let categoriesAdded = 0
+    for (const incoming of data.categories) {
+      const sameId = knownCategories.find((category) => category.id === incoming.id)
+      if (sameId) {
+        categoryIdMap.set(incoming.id, sameId.id)
+        continue
+      }
+
+      const normalizedName = incoming.name.trim().toLocaleLowerCase('tr-TR')
+      const sameName = knownCategories.find(
+        (category) =>
+          category.name.trim().toLocaleLowerCase('tr-TR') === normalizedName,
+      )
+      if (sameName) {
+        categoryIdMap.set(incoming.id, sameName.id)
+        continue
+      }
+
+      await categoryStore.add(incoming)
+      knownCategories.push(incoming)
+      categoryIdMap.set(incoming.id, incoming.id)
+      categoriesAdded += 1
+    }
+
     const knownSubjects = [...currentSubjects]
     const subjectIdMap = new Map<string, string>()
-
     let subjectsAdded = 0
     let recordsAdded = 0
     let recordsSkipped = 0
     let settingsAdded = 0
 
-    // Dersleri mevcut kayıtlarla güvenli biçimde eşleştir.
     for (const incoming of data.subjects) {
-      const sameId = knownSubjects.find(
-        (subject) => subject.id === incoming.id,
-      )
+      const mappedCategoryId = incoming.categoryId
+        ? categoryIdMap.get(incoming.categoryId) ?? incoming.categoryId
+        : undefined
 
+      const sameId = knownSubjects.find((subject) => subject.id === incoming.id)
       if (sameId) {
-        if (sameId.examType !== incoming.examType) {
-          throw new Error(
-            `"${incoming.name}" dersi için sınav türü uyuşmazlığı var.`,
-          )
-        }
-
         subjectIdMap.set(incoming.id, sameId.id)
         continue
       }
 
-      const normalizedName = incoming.name
-        .trim()
-        .toLocaleLowerCase('tr-TR')
-
+      const normalizedName = incoming.name.trim().toLocaleLowerCase('tr-TR')
       const sameName = knownSubjects.find(
         (subject) =>
-          subject.examType === incoming.examType &&
-          subject.name.trim().toLocaleLowerCase('tr-TR') ===
-            normalizedName,
+          (subject.categoryId ?? '') === (mappedCategoryId ?? '') &&
+          subject.name.trim().toLocaleLowerCase('tr-TR') === normalizedName,
       )
-
       if (sameName) {
         subjectIdMap.set(incoming.id, sameName.id)
         continue
       }
 
-      await subjectStore.add(incoming)
-      knownSubjects.push(incoming)
-      subjectIdMap.set(incoming.id, incoming.id)
+      const mappedSubject: Subject = {
+        ...incoming,
+        ...(mappedCategoryId ? { categoryId: mappedCategoryId } : {}),
+      }
+      await subjectStore.add(mappedSubject)
+      knownSubjects.push(mappedSubject)
+      subjectIdMap.set(incoming.id, mappedSubject.id)
       subjectsAdded += 1
     }
 
-    // Mevcut kayıt kimliklerini koru; aynı ID'yi ikinci kez ekleme.
-    const knownRecordIds = new Set(
-      currentRecords.map((record) => record.id),
-    )
-
+    const knownRecordIds = new Set(currentRecords.map((record) => record.id))
     for (const incoming of data.records) {
       if (knownRecordIds.has(incoming.id)) {
         recordsSkipped += 1
@@ -457,51 +595,29 @@ export async function mergeBackupData(
 
       const mappedSubjectId =
         subjectIdMap.get(incoming.subjectId) ??
-        knownSubjects.find(
-          (subject) => subject.id === incoming.subjectId,
-        )?.id
-
+        knownSubjects.find((subject) => subject.id === incoming.subjectId)?.id
       if (!mappedSubjectId) {
         throw new Error(
           `"${incoming.topic}" kaydının dersi bulunamadı. Yedek içe aktarılmadı.`,
         )
       }
 
-      const mappedSubject = knownSubjects.find(
-        (subject) => subject.id === mappedSubjectId,
-      )
-
-      if (!mappedSubject || mappedSubject.examType !== incoming.examType) {
-        throw new Error(
-          `"${incoming.topic}" kaydı ile dersinin sınav türü eşleşmiyor.`,
-        )
-      }
-
-      await recordStore.add({
-        ...incoming,
-        subjectId: mappedSubjectId,
-      })
-
+      await recordStore.add({ ...incoming, subjectId: mappedSubjectId })
       knownRecordIds.add(incoming.id)
       recordsAdded += 1
     }
 
-    // Yerel ayarları ezme; yalnızca henüz bulunmayanları ekle.
-    const knownSettingKeys = new Set(
-      currentSettings.map((setting) => setting.key),
-    )
-
+    const knownSettingKeys = new Set(currentSettings.map((setting) => setting.key))
     for (const setting of data.settings) {
       if (knownSettingKeys.has(setting.key)) continue
-
       await settingsStore.add(setting)
       knownSettingKeys.add(setting.key)
       settingsAdded += 1
     }
 
     await tx.done
-
     return {
+      categoriesAdded,
       subjectsAdded,
       recordsAdded,
       recordsSkipped,
@@ -511,57 +627,36 @@ export async function mergeBackupData(
     try {
       tx.abort()
     } catch {
-      // İşlem zaten tamamlanmış veya iptal edilmiş olabilir.
+      // The transaction may already have completed or been aborted.
     }
-
     try {
       await tx.done
     } catch {
-      // İptal edilen işlemin tamamlanma hatasını burada tüket.
+      // Consume the abort completion error.
     }
-
     throw error
   }
 }
 
-
-/**
- * Uygulama verilerini sıfırlar.
- * Çalışma kayıtlarını ve ayarları temizler, varsayılan dersleri geri yükler.
- * İşlemler başarısız olursa IndexedDB transaction değişiklikleri geri alır.
- */
+/** Clears local data explicitly requested by the user; no defaults are recreated. */
 export async function resetAllData(): Promise<number> {
   const db = await openDatabase()
-
   const tx = db.transaction(
-    ['subjects', 'records', 'settings'],
+    ['categories', 'subjects', 'records', 'settings'],
     'readwrite',
   )
-
+  const categoryStore = tx.objectStore('categories')
   const subjectStore = tx.objectStore('subjects')
   const recordStore = tx.objectStore('records')
   const settingsStore = tx.objectStore('settings')
-
   const recordsDeleted = await recordStore.count()
 
   await Promise.all([
+    categoryStore.clear(),
     subjectStore.clear(),
     recordStore.clear(),
     settingsStore.clear(),
   ])
-
-  const createdAt = new Date().toISOString()
-
-  await Promise.all(
-    defaultSubjects.map((subject) =>
-      subjectStore.add({
-        ...subject,
-        createdAt,
-      }),
-    ),
-  )
-
   await tx.done
-
   return recordsDeleted
 }

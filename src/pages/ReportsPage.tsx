@@ -8,15 +8,17 @@ import {
   startOfWeek,
   subDays,
 } from 'date-fns'
-import { tr } from 'date-fns/locale'
+import { enUS, tr } from 'date-fns/locale'
+import { useI18n } from '../localization/i18n'
 import { Download, FileText, Printer } from 'lucide-react'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import {
   getStudyRecordsForDateRange,
+  getCategories,
   getSubjects,
 } from '../db/database'
-import type { Subject, StudyRecord } from '../types/study'
+import type { Category, Subject, StudyRecord } from '../types/study'
 
 type ReportType = 'daily' | 'weekly' | 'fortnightly' | 'monthly' | 'custom'
 
@@ -32,14 +34,12 @@ function dateFromKey(value: string) {
   return new Date(year, month - 1, day, 12)
 }
 
-function dateLabel(value: string) {
-  return format(dateFromKey(value), 'd MMMM yyyy', { locale: tr })
+function dateLabel(value: string, language: 'tr' | 'en') {
+  return format(dateFromKey(value), 'd MMMM yyyy', { locale: language === 'tr' ? tr : enUS })
 }
 
-function errorMessage(error: unknown) {
-  return error instanceof Error
-    ? error.message
-    : 'İşlem tamamlanamadı. Lütfen tekrar dene.'
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback
 }
 
 function getPresetRange(type: ReportType, today = new Date()) {
@@ -73,16 +73,12 @@ function getPresetRange(type: ReportType, today = new Date()) {
   }
 }
 
-function getReportTitle(type: ReportType) {
-  const titles: Record<ReportType, string> = {
-    daily: 'Günlük Çalışma Raporu',
-    weekly: 'Haftalık Çalışma Raporu',
-    fortnightly: 'İki Haftalık Çalışma Raporu',
-    monthly: 'Aylık Çalışma Raporu',
-    custom: 'Çalışma Raporu',
+function getReportTitle(type: ReportType, t: (key: import('../localization/i18n').TranslationKey) => string) {
+  const titles: Record<ReportType, import('../localization/i18n').TranslationKey> = {
+    daily: 'reports.titleDaily', weekly: 'reports.titleWeekly',
+    fortnightly: 'reports.titleFortnightly', monthly: 'reports.titleMonthly', custom: 'reports.titleCustom',
   }
-
-  return titles[type]
+  return t(titles[type])
 }
 
 async function loadFontAsBase64(path: string): Promise<string> {
@@ -128,6 +124,7 @@ interface ReportsPageProps {
 }
 
 export default function ReportsPage({ onNavigate }: ReportsPageProps) {
+  const { language, t } = useI18n()
   const today = new Date()
   const initialRange = getPresetRange('monthly', today)
 
@@ -138,6 +135,7 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
 
   const [records, setRecords] = useState<StudyRecord[]>([])
   const [subjects, setSubjects] = useState<Subject[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState('')
@@ -157,14 +155,15 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
       if (!validRange) {
         setRecords([])
         setLoading(false)
-        setError('Başlangıç tarihi bitiş tarihinden sonra olamaz.')
+        setError(t('reports.invalidRange'))
         return
       }
 
       try {
-        const [loadedRecords, loadedSubjects] = await Promise.all([
+        const [loadedRecords, loadedSubjects, loadedCategories] = await Promise.all([
           getStudyRecordsForDateRange(startDate, endDate),
           getSubjects(),
+          getCategories(),
         ])
 
         if (cancelled) return
@@ -177,8 +176,9 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
 
         setRecords(loadedRecords)
         setSubjects(loadedSubjects)
+        setCategories(loadedCategories)
       } catch (caught) {
-        if (!cancelled) setError(errorMessage(caught))
+        if (!cancelled) setError(errorMessage(caught, t('reports.genericError')))
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -189,7 +189,7 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
     return () => {
       cancelled = true
     }
-  }, [startDate, endDate, validRange])
+  }, [startDate, endDate, validRange, t])
 
   function selectReportType(nextType: ReportType) {
     setReportType(nextType)
@@ -216,19 +216,17 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
   const subjectById = new Map(
     subjects.map((subject) => [subject.id, subject]),
   )
+  const categoryNameById = new Map(
+    categories.map((category) => [category.id, category.name]),
+  )
+  const categoryLabelForSubject = (subject?: Subject) =>
+    subject?.categoryId ? categoryNameById.get(subject.categoryId) ?? t('reports.uncategorized') : t('reports.uncategorized')
+  const activeStudyDayCount = new Set(records.map((record) => record.date)).size
 
   const totalQuestions = records.reduce(
     (sum, record) => sum + record.questionCount,
     0,
   )
-
-  const tytQuestions = records
-    .filter((record) => record.examType === 'TYT')
-    .reduce((sum, record) => sum + record.questionCount, 0)
-
-  const aytQuestions = records
-    .filter((record) => record.examType === 'AYT')
-    .reduce((sum, record) => sum + record.questionCount, 0)
 
   const subjectSummary = subjects
     .map((subject) => ({
@@ -240,15 +238,15 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
     .filter((item) => item.questions > 0)
     .sort((a, b) => b.questions - a.questions)
 
-  const reportTitle = getReportTitle(reportType)
+  const reportTitle = getReportTitle(reportType, t)
   const rangeDescription =
     validRange
-      ? `${dateLabel(startDate)} – ${dateLabel(endDate)}`
-      : 'Geçersiz tarih aralığı'
+      ? `${dateLabel(startDate, language)} – ${dateLabel(endDate, language)}`
+      : t('reports.invalidDateRange')
 
   async function downloadPdf() {
     if (!validRange) {
-      setError('Geçerli bir başlangıç ve bitiş tarihi seç.')
+      setError(t('reports.selectValidRange'))
       return
     }
 
@@ -270,7 +268,7 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
       const pageHeight = pdf.internal.pageSize.getHeight()
       const margin = 14
       const generatedAt = format(new Date(), 'd MMMM yyyy, HH:mm', {
-        locale: tr,
+        locale: language === 'tr' ? tr : enUS,
       })
 
       pdf.setProperties({
@@ -288,16 +286,16 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
       pdf.setFont('Roboto', 'normal')
       pdf.setFontSize(9)
       pdf.setTextColor(95, 106, 119)
-      pdf.text(`Tarih aralığı: ${rangeDescription}`, margin, 24)
-      pdf.text(`Rapor tarihi: ${generatedAt}`, pageWidth - margin, 24, {
+      pdf.text(`${t('reports.dateRange')}: ${rangeDescription}`, margin, 24)
+      pdf.text(`${t('reports.generatedDate')}: ${generatedAt}`, pageWidth - margin, 24, {
         align: 'right',
       })
 
       const metrics = [
-        { label: 'Toplam soru', value: totalQuestions },
-        { label: 'TYT sorusu', value: tytQuestions },
-        { label: 'AYT sorusu', value: aytQuestions },
-        { label: 'Çalışma kaydı', value: records.length },
+        { label: t('reports.totalQuestions'), value: totalQuestions },
+        { label: t('reports.subjectCount'), value: subjectSummary.length },
+        { label: t('reports.recordCount'), value: records.length },
+        { label: t('reports.studyDays'), value: activeStudyDayCount },
       ]
 
       const gap = 4
@@ -321,7 +319,7 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
         pdf.setFontSize(14)
         pdf.setTextColor(36, 75, 56)
         pdf.text(
-          metric.value.toLocaleString('tr-TR'),
+          metric.value.toLocaleString(language === 'tr' ? 'tr-TR' : 'en-US'),
           x + 4,
           cardY + 16,
         )
@@ -330,18 +328,18 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
       pdf.setFont('Roboto', 'bold')
       pdf.setFontSize(11)
       pdf.setTextColor(23, 36, 56)
-      pdf.text('Ders bazında soru özeti', margin, 59)
+      pdf.text(t('reports.subjectSummary'), margin, 59)
 
       autoTable(pdf, {
         startY: 63,
         margin: { left: margin, right: margin, bottom: 17 },
         tableWidth: 132,
-        head: [['Ders', 'Sınav', 'Soru']],
+        head: [[t('reports.subject'), t('reports.category'), t('reports.questions')]],
         body: subjectSummary.length
           ? subjectSummary.map(({ subject, questions }) => [
               subject.name,
-              subject.examType,
-              questions.toLocaleString('tr-TR'),
+              categoryLabelForSubject(subject),
+              questions.toLocaleString(language === 'tr' ? 'tr-TR' : 'en-US'),
             ])
           : [['—', '—', '0']],
         theme: 'grid',
@@ -376,33 +374,26 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
       pdf.setFont('Roboto', 'bold')
       pdf.setFontSize(11)
       pdf.setTextColor(23, 36, 56)
-      pdf.text('Ayrıntılı çalışma kayıtları', margin, detailsHeadingY)
+      pdf.text(t('reports.detailedRecords'), margin, detailsHeadingY)
 
       const detailHeaders = [
-        'Tarih',
-        'Sınav',
-        'Ders',
-        'Konu / kaynak',
-        'Soru',
-        'Doğru',
-        'Yanlış',
-        'Boş',
+        t('reports.date'), t('reports.category'), t('reports.subject'), t('reports.topicSource'), t('reports.questions'), t('reports.correct'), t('reports.incorrect'), t('reports.blank'),
       ]
 
-      if (includeNotes) detailHeaders.push('Notlar')
+      if (includeNotes) detailHeaders.push(t('reports.notes'))
 
       const detailRows = records.length
         ? records.map((record) => {
             const topicAndSource = record.source
-              ? `${record.topic}\nKaynak: ${record.source}`
+              ? `${record.topic}\n${t('reports.source')}: ${record.source}`
               : record.topic
 
             const row = [
-              record.date,
-              record.examType,
-              subjectById.get(record.subjectId)?.name ?? 'Bilinmeyen ders',
+              dateLabel(record.date, language),
+              categoryLabelForSubject(subjectById.get(record.subjectId)),
+              subjectById.get(record.subjectId)?.name ?? t('reports.unknownSubject'),
               topicAndSource,
-              record.questionCount.toLocaleString('tr-TR'),
+              record.questionCount.toLocaleString(language === 'tr' ? 'tr-TR' : 'en-US'),
               record.correctCount === undefined
                 ? '—'
                 : String(record.correctCount),
@@ -423,7 +414,7 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
               '—',
               '—',
               '—',
-              'Seçilen tarih aralığında kayıt bulunmuyor.',
+              t('reports.noRecordsInRange'),
               '0',
               '—',
               '—',
@@ -434,7 +425,7 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
 
       const columnStyles: Record<number, { cellWidth: number; halign?: 'left' | 'right' }> = {
         0: { cellWidth: 24 },
-        1: { cellWidth: 15 },
+        1: { cellWidth: 28 },
         2: { cellWidth: 32 },
         3: { cellWidth: includeNotes ? 52 : 112 },
         4: { cellWidth: 15, halign: 'right' },
@@ -489,10 +480,10 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
         })
       }
 
-      pdf.save(`calisma-raporu-${startDate}-${endDate}.pdf`)
-      setSuccess('PDF raporu oluşturuldu ve indirme başlatıldı.')
+      pdf.save(`${language === 'tr' ? 'calisma-raporu' : 'study-report'}-${startDate}-${endDate}.pdf`)
+      setSuccess(t('reports.pdfSuccess'))
     } catch (caught) {
-      setError(errorMessage(caught))
+      setError(errorMessage(caught, t('reports.genericError')))
     } finally {
       setGenerating(false)
     }
@@ -502,10 +493,10 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
     <div className="space-y-7">
       <section>
         <h2 className="text-base font-semibold text-slate-900">
-          PDF raporları
+          {t('reports.pageTitle')}
         </h2>
         <p className="mt-1 text-xs leading-5 text-slate-500">
-          Çalışma geçmişini seçtiğin tarih aralığı için önizle ve PDF olarak kaydet.
+          {t('reports.pageDescription')}
         </p>
       </section>
 
@@ -534,10 +525,10 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
           </div>
           <div>
             <h3 className="text-sm font-semibold text-slate-900">
-              Rapor ayarları
+              {t('reports.settingsTitle')}
             </h3>
             <p className="mt-1 text-xs text-slate-500">
-              Hafta pazartesi başlar. Özel aralıkta başlangıç ve bitiş tarihlerini kendin belirleyebilirsin.
+              {t('reports.settingsDescription')}
             </p>
           </div>
         </div>
@@ -545,7 +536,7 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
         <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
           <div>
             <label htmlFor="report-type" className="text-xs font-medium text-slate-700">
-              Rapor türü
+              {t('reports.reportType')}
             </label>
             <select
               id="report-type"
@@ -555,17 +546,17 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
               }
               className={`${inputClass} mt-1.5`}
             >
-              <option value="daily">Günlük</option>
-              <option value="weekly">Haftalık</option>
-              <option value="fortnightly">İki haftalık</option>
-              <option value="monthly">Aylık</option>
-              <option value="custom">Özel tarih aralığı</option>
+              <option value="daily">{t('reports.daily')}</option>
+              <option value="weekly">{t('reports.weekly')}</option>
+              <option value="fortnightly">{t('reports.fortnightly')}</option>
+              <option value="monthly">{t('reports.monthly')}</option>
+              <option value="custom">{t('reports.custom')}</option>
             </select>
           </div>
 
           <div>
             <label htmlFor="report-start" className="text-xs font-medium text-slate-700">
-              Başlangıç tarihi
+              {t('reports.startDate')}
             </label>
             <input
               id="report-start"
@@ -579,7 +570,7 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
 
           <div>
             <label htmlFor="report-end" className="text-xs font-medium text-slate-700">
-              Bitiş tarihi
+              {t('reports.endDate')}
             </label>
             <input
               id="report-end"
@@ -599,7 +590,7 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
             onChange={(event) => setIncludeNotes(event.target.checked)}
             className="mt-0.5 accent-[#315b3d]"
           />
-          PDF ayrıntılı tablosuna çalışma notlarını ekle.
+          {t('reports.includeNotes')}
         </label>
 
         <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
@@ -610,7 +601,7 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#244b38] px-4 py-3 text-xs font-semibold text-white transition-colors hover:bg-[#193b2a] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Download size={16} />
-            {generating ? 'PDF hazırlanıyor…' : 'PDF oluştur ve indir'}
+            {generating ? t('reports.generating') : t('reports.downloadPdf')}
           </button>
 
           {onNavigate && (
@@ -620,12 +611,12 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
               className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
             >
               <Printer size={15} />
-              Takvime dön
+              {t('reports.backToCalendar')}
             </button>
           )}
 
           <span className="text-xs text-slate-500">
-            {loading ? 'Kayıtlar yükleniyor…' : `${records.length} kayıt bulundu`}
+            {loading ? t('reports.loadingRecords') : `${records.length} ${t('reports.recordsFound')}`}
           </span>
         </div>
       </section>
@@ -633,7 +624,7 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
       <section className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white">
         <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
           <p className="text-[10px] font-semibold tracking-[0.15em] text-slate-400">
-            PDF ÖNİZLEMESİ
+            {t('reports.preview')}
           </p>
           <h3 className="mt-1.5 text-base font-semibold text-slate-900">
             {reportTitle}
@@ -643,10 +634,10 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
 
         <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-4 sm:p-6">
           {[
-            { label: 'Toplam soru', value: totalQuestions },
-            { label: 'TYT soruları', value: tytQuestions },
-            { label: 'AYT soruları', value: aytQuestions },
-            { label: 'Kayıt sayısı', value: records.length },
+            { label: t('reports.totalQuestions'), value: totalQuestions },
+            { label: t('reports.subjectCount'), value: subjectSummary.length },
+            { label: t('reports.recordCount'), value: records.length },
+            { label: t('reports.studyDays'), value: activeStudyDayCount },
           ].map((metric) => (
             <div
               key={metric.label}
@@ -654,7 +645,7 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
             >
               <p className="text-[11px] text-slate-500">{metric.label}</p>
               <p className="mt-2 text-xl font-semibold tabular-nums text-slate-900">
-                {loading ? '…' : metric.value.toLocaleString('tr-TR')}
+                {loading ? '…' : metric.value.toLocaleString(language === 'tr' ? 'tr-TR' : 'en-US')}
               </p>
             </div>
           ))}
@@ -662,32 +653,32 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
 
         <div className="px-4 pb-6 sm:px-6">
           <h4 className="text-sm font-semibold text-slate-900">
-            Ders toplamları
+            {t('reports.subjectTotals')}
           </h4>
 
           {subjectSummary.length === 0 ? (
             <p className="mt-3 rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-500">
               {loading
-                ? 'Kayıtlar yükleniyor…'
-                : 'Bu tarih aralığında çalışma kaydı bulunmuyor.'}
+                ? t('reports.loadingRecords')
+                : t('reports.noRecordsInRange')}
             </p>
           ) : (
             <div className="mt-3 overflow-x-auto rounded-xl border border-slate-200">
               <table className="w-full min-w-[360px] text-left text-xs">
                 <thead className="bg-[#172438] text-white">
                   <tr>
-                    <th className="px-4 py-3 font-medium">Ders</th>
-                    <th className="px-4 py-3 font-medium">Sınav</th>
-                    <th className="px-4 py-3 text-right font-medium">Soru</th>
+                    <th className="px-4 py-3 font-medium">{t('reports.subject')}</th>
+                    <th className="px-4 py-3 font-medium">{t('reports.category')}</th>
+                    <th className="px-4 py-3 text-right font-medium">{t('reports.questions')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {subjectSummary.map(({ subject, questions }) => (
                     <tr key={subject.id}>
                       <td className="px-4 py-3 text-slate-800">{subject.name}</td>
-                      <td className="px-4 py-3 text-slate-600">{subject.examType}</td>
+                      <td className="px-4 py-3 text-slate-600">{categoryLabelForSubject(subject)}</td>
                       <td className="px-4 py-3 text-right font-medium tabular-nums text-slate-800">
-                        {questions.toLocaleString('tr-TR')}
+                        {questions.toLocaleString(language === 'tr' ? 'tr-TR' : 'en-US')}
                       </td>
                     </tr>
                   ))}
@@ -699,35 +690,35 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
           <div className="mt-6 flex flex-wrap items-end justify-between gap-2">
             <div>
               <h4 className="text-sm font-semibold text-slate-900">
-                Ayrıntılı çalışma kayıtları
+                {t('reports.detailedRecords')}
               </h4>
               <p className="mt-1 text-xs text-slate-500">
-                Tarih, sınav türü, ders, konu ve soru dağılımı
+                {t('reports.detailDescription')}
                 {includeNotes ? ', notlar' : ''}.
               </p>
             </div>
             <span className="text-[11px] text-slate-400">
-              {records.length} satır
+              {records.length} {t('reports.rows')}
             </span>
           </div>
 
           {records.length === 0 && !loading ? (
             <p className="mt-3 rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-500">
-              Bu aralıkta ayrıntılı olarak gösterilecek kayıt yok.
+              {t('reports.noDetailedRecords')}
             </p>
           ) : (
             <div className="mt-3 overflow-x-auto rounded-xl border border-slate-200">
               <table className="w-full min-w-[850px] text-left text-xs">
                 <thead className="bg-[#172438] text-white">
                   <tr>
-                    <th className="px-3 py-3 font-medium">Tarih</th>
-                    <th className="px-3 py-3 font-medium">Sınav</th>
-                    <th className="px-3 py-3 font-medium">Ders</th>
-                    <th className="px-3 py-3 font-medium">Konu / kaynak</th>
-                    <th className="px-3 py-3 text-right font-medium">Soru</th>
-                    <th className="px-3 py-3 text-right font-medium">Doğru</th>
-                    <th className="px-3 py-3 text-right font-medium">Yanlış</th>
-                    <th className="px-3 py-3 text-right font-medium">Boş</th>
+                    <th className="px-3 py-3 font-medium">{t('reports.date')}</th>
+                    <th className="px-3 py-3 font-medium">{t('reports.category')}</th>
+                    <th className="px-3 py-3 font-medium">{t('reports.subject')}</th>
+                    <th className="px-3 py-3 font-medium">{t('reports.topicSource')}</th>
+                    <th className="px-3 py-3 text-right font-medium">{t('reports.questions')}</th>
+                    <th className="px-3 py-3 text-right font-medium">{t('reports.correct')}</th>
+                    <th className="px-3 py-3 text-right font-medium">{t('reports.incorrect')}</th>
+                    <th className="px-3 py-3 text-right font-medium">{t('reports.blank')}</th>
                     {includeNotes && (
                       <th className="px-3 py-3 font-medium">Notlar</th>
                     )}
@@ -739,9 +730,9 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
                       <td className="whitespace-nowrap px-3 py-3 text-slate-600">
                         {record.date}
                       </td>
-                      <td className="px-3 py-3 text-slate-600">{record.examType}</td>
+                      <td className="px-3 py-3 text-slate-600">{categoryLabelForSubject(subjectById.get(record.subjectId))}</td>
                       <td className="px-3 py-3 text-slate-700">
-                        {subjectById.get(record.subjectId)?.name ?? 'Bilinmeyen ders'}
+                        {subjectById.get(record.subjectId)?.name ?? t('reports.unknownSubject')}
                       </td>
                       <td className="max-w-[260px] whitespace-pre-wrap px-3 py-3 text-slate-700">
                         {record.topic}
@@ -776,8 +767,8 @@ export default function ReportsPage({ onNavigate }: ReportsPageProps) {
           )}
 
           <p className="mt-4 text-[10px] leading-5 text-slate-400">
-            Bu önizleme gerçek yerel çalışma kayıtlarından oluşturuluyor.
-            PDF sayfa düzeni ve sayfa numaraları indirme sırasında uygulanır.
+            {t('reports.previewNotice1')}
+            {t('reports.previewNotice2')}
           </p>
         </div>
       </section>

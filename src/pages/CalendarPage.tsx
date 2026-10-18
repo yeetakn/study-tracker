@@ -13,7 +13,8 @@ import {
   startOfWeek,
   subMonths,
 } from 'date-fns'
-import { tr } from 'date-fns/locale'
+import { enUS, tr } from 'date-fns/locale'
+import { useI18n, type Language } from '../localization/i18n'
 import {
   CalendarDays,
   ChevronLeft,
@@ -29,24 +30,33 @@ import {
   deleteStudyRecord,
   getStudyRecordsByDate,
   getStudyRecordsForDateRange,
+  getCategories,
   getSubjects,
   saveStudyRecord,
 } from '../db/database'
 import type {
+  Category,
   Subject,
   StudyRecord,
   StudyRecordDraft,
 } from '../types/study'
 
-const weekdays = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz']
-
-function capitalizeFirst(value: string) {
-  return value.charAt(0).toLocaleUpperCase('tr-TR') + value.slice(1)
+function getDateLocale(language: Language) {
+  return language === 'tr' ? tr : enUS
 }
 
-function formatDate(date: Date) {
+function getNumberLocale(language: Language) {
+  return language === 'tr' ? 'tr-TR' : 'en-US'
+}
+
+function capitalizeFirst(value: string, language: Language) {
+  return value.charAt(0).toLocaleUpperCase(getNumberLocale(language)) + value.slice(1)
+}
+
+function formatDate(date: Date, language: Language) {
   return capitalizeFirst(
-    format(date, 'EEEE, d MMMM yyyy', { locale: tr }),
+    format(date, 'EEEE, d MMMM yyyy', { locale: getDateLocale(language) }),
+    language,
   )
 }
 
@@ -56,18 +66,22 @@ function dateFromKey(key: string): Date {
   return new Date(year, month - 1, day, 12)
 }
 
-function getErrorMessage(error: unknown) {
-  return error instanceof Error
-    ? error.message
-    : 'İşlem tamamlanamadı. Lütfen tekrar dene.'
+function getErrorMessage(error: unknown, fallbackMessage: string) {
+  return error instanceof Error ? error.message : fallbackMessage
 }
 
 export default function CalendarPage() {
+  const { language, t } = useI18n()
+  const weekdays = language === 'tr'
+    ? ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz']
+    : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
   const [currentMonth, setCurrentMonth] = useState(() =>
     startOfMonth(new Date()),
   )
   const [selectedDate, setSelectedDate] = useState(() => new Date())
   const [subjects, setSubjects] = useState<Subject[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
   const [selectedRecords, setSelectedRecords] = useState<StudyRecord[]>([])
   const [monthRecords, setMonthRecords] = useState<StudyRecord[]>([])
   const [editingRecord, setEditingRecord] = useState<StudyRecord | undefined>()
@@ -97,10 +111,13 @@ export default function CalendarPage() {
 
     async function loadSubjects() {
       try {
-        const result = await getSubjects()
-        if (!cancelled) setSubjects(result)
+        const [result, loadedCategories] = await Promise.all([getSubjects(), getCategories()])
+        if (!cancelled) {
+          setSubjects(result)
+          setCategories(loadedCategories)
+        }
       } catch (caught) {
-        if (!cancelled) setError(getErrorMessage(caught))
+        if (!cancelled) setError(getErrorMessage(caught, t('calendar.genericError')))
       }
     }
 
@@ -109,7 +126,7 @@ export default function CalendarPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [t])
 
   useEffect(() => {
     let cancelled = false
@@ -122,7 +139,7 @@ export default function CalendarPage() {
         )
         if (!cancelled) setMonthRecords(result)
       } catch (caught) {
-        if (!cancelled) setError(getErrorMessage(caught))
+        if (!cancelled) setError(getErrorMessage(caught, t('calendar.genericError')))
       }
     }
 
@@ -131,7 +148,7 @@ export default function CalendarPage() {
     return () => {
       cancelled = true
     }
-  }, [calendarStartKey, calendarEndKey, refreshToken])
+  }, [calendarStartKey, calendarEndKey, refreshToken, t])
 
   useEffect(() => {
     let cancelled = false
@@ -144,7 +161,7 @@ export default function CalendarPage() {
         const result = await getStudyRecordsByDate(selectedDateKey)
         if (!cancelled) setSelectedRecords(result)
       } catch (caught) {
-        if (!cancelled) setError(getErrorMessage(caught))
+        if (!cancelled) setError(getErrorMessage(caught, t('calendar.genericError')))
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -155,7 +172,7 @@ export default function CalendarPage() {
     return () => {
       cancelled = true
     }
-  }, [selectedDateKey, refreshToken])
+  }, [selectedDateKey, refreshToken, t])
 
   function changeMonth(direction: 'previous' | 'next') {
     setCurrentMonth((month) =>
@@ -189,15 +206,15 @@ export default function CalendarPage() {
     setShowForm(false)
     setMessage(
       existingRecord
-        ? 'Çalışma kaydı güncellendi.'
-        : 'Çalışma kaydı başarıyla eklendi.',
+        ? t('calendar.updateSuccess')
+        : t('calendar.addSuccess'),
     )
     setRefreshToken((value) => value + 1)
   }
 
   async function handleDelete(record: StudyRecord) {
     const confirmed = window.confirm(
-      `"${record.topic}" çalışma kaydı silinsin mi? Bu işlem geri alınamaz.`,
+      `${t('calendar.deleteConfirmPrefix')}${record.topic}${t('calendar.deleteConfirmSuffix')}`,
     )
 
     if (!confirmed) return
@@ -211,10 +228,10 @@ export default function CalendarPage() {
       }
 
       setError('')
-      setMessage('Çalışma kaydı silindi.')
+      setMessage(t('calendar.deleteSuccess'))
       setRefreshToken((value) => value + 1)
     } catch (caught) {
-      setError(getErrorMessage(caught))
+      setError(getErrorMessage(caught, t('calendar.genericError')))
     }
   }
 
@@ -238,16 +255,20 @@ export default function CalendarPage() {
 
   const subjectName = (record: StudyRecord) =>
     subjects.find((subject) => subject.id === record.subjectId)?.name ??
-    'Bilinmeyen ders'
+    t('calendar.unknownSubject')
+  const categoryName = (record: StudyRecord) => {
+    const subject = subjects.find((item) => item.id === record.subjectId)
+    return categories.find((category) => category.id === subject?.categoryId)?.name ?? t('calendar.uncategorized')
+  }
 
   return (
     <section className="space-y-6">
       <div>
         <h2 className="text-base font-semibold text-slate-900">
-          Çalışma takvimi
+          {t('calendar.title')}
         </h2>
         <p className="mt-1 text-xs leading-5 text-slate-500">
-          Bir gün seç, çalışmalarını kaydet ve geçmişini düzenle.
+          {t('calendar.subtitle')}
         </p>
       </div>
 
@@ -274,11 +295,12 @@ export default function CalendarPage() {
           <div className="mb-6 flex items-center justify-between gap-3">
             <div>
               <p className="text-[10px] font-semibold tracking-[0.16em] text-slate-400">
-                AYLIK GÖRÜNÜM
+                {t('calendar.monthlyView')}
               </p>
               <h3 className="mt-1.5 text-lg font-semibold tracking-tight text-slate-900 sm:text-xl">
                 {capitalizeFirst(
-                  format(currentMonth, 'LLLL yyyy', { locale: tr }),
+                  format(currentMonth, 'LLLL yyyy', { locale: getDateLocale(language) }),
+                  language,
                 )}
               </h3>
             </div>
@@ -287,7 +309,7 @@ export default function CalendarPage() {
               <button
                 type="button"
                 onClick={() => changeMonth('previous')}
-                aria-label="Önceki ay"
+                aria-label={t('calendar.previousMonth')}
                 className="flex size-10 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition-colors hover:bg-slate-50"
               >
                 <ChevronLeft size={19} />
@@ -295,7 +317,7 @@ export default function CalendarPage() {
               <button
                 type="button"
                 onClick={() => changeMonth('next')}
-                aria-label="Sonraki ay"
+                aria-label={t('calendar.nextMonth')}
                 className="flex size-10 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition-colors hover:bg-slate-50"
               >
                 <ChevronRight size={19} />
@@ -325,7 +347,7 @@ export default function CalendarPage() {
                   key={dayKey}
                   type="button"
                   onClick={() => selectDate(day)}
-                  aria-label={`${formatDate(day)}${hasRecords ? ', çalışma kaydı var' : ''}`}
+                  aria-label={`${formatDate(day, language)}${hasRecords ? `, ${t('calendar.hasRecords')}` : ''}`}
                   aria-pressed={selected}
                   className={[
                     'relative flex aspect-square min-w-0 flex-col items-center justify-center rounded-xl text-xs transition-colors sm:text-sm',
@@ -364,15 +386,15 @@ export default function CalendarPage() {
           <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-slate-100 pt-4">
             <div className="flex items-center gap-2 text-[11px] text-slate-500">
               <span className="size-2.5 rounded-full bg-[#172438]" />
-              Seçili gün
+              {t('calendar.selectedDay')}
             </div>
             <div className="flex items-center gap-2 text-[11px] text-slate-500">
               <span className="size-2.5 rounded-full border border-[#8eb49a]" />
-              Bugün
+              {t('calendar.today')}
             </div>
             <div className="flex items-center gap-2 text-[11px] text-slate-500">
               <span className="size-2.5 rounded-full bg-[#598565]" />
-              Kayıt bulunan gün
+              {t('calendar.dayWithRecords')}
             </div>
           </div>
         </section>
@@ -382,17 +404,17 @@ export default function CalendarPage() {
             <div className="flex items-center gap-2 text-[#d0e4d5]">
               <CalendarDays size={16} />
               <span className="text-[10px] font-semibold tracking-[0.14em]">
-                SEÇİLİ TARİH
+                {t('calendar.selectedDate')}
               </span>
             </div>
 
             <h3 className="mt-3 text-lg font-semibold leading-snug">
-              {formatDate(selectedDate)}
+              {formatDate(selectedDate, language)}
             </h3>
 
             {isToday(selectedDate) && (
               <span className="mt-3 inline-flex rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-[10px] text-slate-200">
-                Bugün
+                {t('calendar.today')}
               </span>
             )}
           </div>
@@ -401,12 +423,12 @@ export default function CalendarPage() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h4 className="text-sm font-semibold text-slate-800">
-                  Günlük çalışma
+                  {t('calendar.dailyStudy')}
                 </h4>
                 <p className="mt-1 text-[11px] text-slate-500">
                   {loading
-                    ? 'Kayıtlar yükleniyor…'
-                    : `${selectedRecords.length} kayıt`}
+                    ? t('calendar.loadingRecords')
+                    : `${selectedRecords.length} ${selectedRecords.length === 1 ? t('calendar.recordSingular') : t('calendar.recordPlural')}`}
                 </p>
               </div>
 
@@ -416,7 +438,7 @@ export default function CalendarPage() {
                 className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-[#244b38] px-3 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-[#193b2a]"
               >
                 <Plus size={15} />
-                Kayıt ekle
+                {t('calendar.addRecord')}
               </button>
             </div>
 
@@ -426,10 +448,10 @@ export default function CalendarPage() {
                   <CalendarDays size={19} />
                 </div>
                 <p className="mt-3 text-sm font-medium text-slate-700">
-                  Henüz kayıt bulunmuyor
+                  {t('calendar.noRecords')}
                 </p>
                 <p className="mt-2 text-xs leading-5 text-slate-500">
-                  Bu güne ait ilk çalışma kaydını ekleyebilirsin.
+                  {t('calendar.addFirstRecord')}
                 </p>
               </div>
             )}
@@ -438,13 +460,13 @@ export default function CalendarPage() {
               {selectedRecords.map((record) => {
                 const resultCounts = [
                   record.correctCount !== undefined
-                    ? `Doğru ${record.correctCount}`
+                    ? `${t('calendar.correct')} ${record.correctCount}`
                     : null,
                   record.incorrectCount !== undefined
-                    ? `Yanlış ${record.incorrectCount}`
+                    ? `${t('calendar.incorrect')} ${record.incorrectCount}`
                     : null,
                   record.blankCount !== undefined
-                    ? `Boş ${record.blankCount}`
+                    ? `${t('calendar.blank')} ${record.blankCount}`
                     : null,
                 ].filter((value): value is string => value !== null)
 
@@ -457,7 +479,7 @@ export default function CalendarPage() {
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="rounded-md bg-[#edf4ee] px-2 py-1 text-[10px] font-semibold text-[#315b3d]">
-                            {record.examType}
+                            {categoryName(record)}
                           </span>
                           <span className="text-[11px] text-slate-500">
                             {subjectName(record)}
@@ -475,9 +497,9 @@ export default function CalendarPage() {
 
                       <div className="shrink-0 text-right">
                         <p className="text-lg font-semibold tracking-tight text-slate-900">
-                          {record.questionCount}
+                          {record.questionCount.toLocaleString(getNumberLocale(language))}
                         </p>
-                        <p className="text-[10px] text-slate-500">soru</p>
+                        <p className="text-[10px] text-slate-500">{t('calendar.questions')}</p>
                       </div>
                     </div>
 
@@ -506,7 +528,7 @@ export default function CalendarPage() {
                         className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
                       >
                         <Pencil size={13} />
-                        Düzenle
+                        {t('calendar.edit')}
                       </button>
                       <button
                         type="button"
@@ -514,7 +536,7 @@ export default function CalendarPage() {
                         className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-semibold text-red-600 hover:bg-red-50"
                       >
                         <Trash2 size={13} />
-                        Sil
+                        {t('calendar.delete')}
                       </button>
                     </div>
                   </article>
@@ -528,6 +550,7 @@ export default function CalendarPage() {
               key={`${selectedDateKey}-${editingRecord?.id ?? 'new'}`}
               defaultDate={selectedDateKey}
               subjects={subjects}
+              categories={categories}
               initialRecord={editingRecord}
               onSave={handleSave}
               onCancel={() => {
@@ -540,7 +563,7 @@ export default function CalendarPage() {
           <div className="border-t border-slate-100 px-5 py-3 sm:px-6">
             <p className="flex items-start gap-2 text-[10px] leading-5 text-slate-400">
               <Clock3 size={13} className="mt-0.5 shrink-0" />
-              Kayıtlar bu tarayıcıda, bilgisayarında saklanır. Düzenli yedek almayı unutma.
+              {t('calendar.localStorageNotice')}
             </p>
           </div>
         </section>
